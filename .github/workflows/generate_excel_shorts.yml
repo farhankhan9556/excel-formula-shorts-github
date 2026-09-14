@@ -4,10 +4,11 @@ on:
   schedule:
     # 04:00 UTC = 08:00 UAE
     - cron: "0 4 * * *"
+
   workflow_dispatch:
     inputs:
       run_date:
-        description: "Optional YYYY-MM-DD. Leave blank for today's rotation."
+        description: "Optional YYYY-MM-DD for testing"
         required: false
         type: string
 
@@ -23,13 +24,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
+          cache: pip
 
-      - name: Install Linux video/spreadsheet tools
+      - name: Install Linux tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -42,9 +43,18 @@ jobs:
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -r requirements.txt
 
-      - name: Generate 3 real-spreadsheet Excel Shorts
+      - name: Test Edge TTS before generating videos
+        run: |
+          python make_voice.py \
+            "This is a Learn Verse Excel tip." \
+            /tmp/tts_test.mp3
+          test -s /tmp/tts_test.mp3
+          ffprobe -v error /tmp/tts_test.mp3
+          echo "TTS test passed."
+
+      - name: Generate 3 Excel Shorts
         env:
           RUN_DATE: ${{ inputs.run_date }}
         run: |
@@ -54,12 +64,19 @@ jobs:
             python generate_daily.py --count 3
           fi
 
-      - name: Validate output
+      - name: Validate generated files
         run: |
           echo "Generated files:"
           ls -lh output/
+
           test "$(find output -maxdepth 1 -name '*.mp4' | wc -l)" -eq 3
           test "$(find output -maxdepth 1 -name '*.xlsx' | wc -l)" -eq 3
+          test -s output/manifest.json
+
+          for f in output/*.mp4; do
+            echo "Checking $f"
+            ffprobe -v error "$f"
+          done
 
       - name: Upload videos and Excel workbooks
         uses: actions/upload-artifact@v4
