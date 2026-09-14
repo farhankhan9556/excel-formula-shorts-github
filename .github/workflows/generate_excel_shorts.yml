@@ -1,23 +1,26 @@
 name: Daily Learn Verse Excel Shorts
+
 on:
   schedule:
     - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       run_date:
-        description: "Optional date for testing (YYYY-MM-DD)"
+        description: "Optional test date (YYYY-MM-DD)"
         required: false
         type: string
       count:
-        description: "Number of Shorts to generate"
+        description: "Number of Shorts"
         required: false
         default: "3"
         type: string
+
 permissions:
   contents: read
+
 jobs:
   generate:
-    name: Generate 3 Excel Shorts
+    name: Generate Learn Verse Excel Shorts
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -30,18 +33,20 @@ jobs:
           cache: pip
       - name: Install Linux tools
         run: |
-          set -e
+          set -eux
           sudo apt-get update
           sudo apt-get install -y ffmpeg libreoffice xvfb xdotool fonts-dejavu fonts-liberation
       - name: Verify tools
         run: |
-          set -e
+          set -eux
           ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
           libreoffice --version
+          xdotool -v
           fc-match "DejaVu Sans"
-      - name: Check repository files
+      - name: Check required files
         run: |
-          set -e
+          set -eux
           test -f formula_library.py
           test -f make_workbook.py
           test -f record_calc.py
@@ -52,19 +57,34 @@ jobs:
           test -f assets/learnverse_logo.png
       - name: Install Python packages
         run: |
-          set -e
+          set -eux
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-      - name: Test Python modules
+      - name: Python syntax check
         run: |
-          python -c "import openpyxl, PIL, edge_tts; print('Python modules OK')"
+          set -eux
+          python -m py_compile formula_library.py make_workbook.py record_calc.py make_voice.py render_video.py generate_daily.py
+      - name: Test workbook generation
+        run: |
+          set -eux
+          rm -rf /tmp/lv-smoke && mkdir -p /tmp/lv-smoke
+          python make_workbook.py 1 /tmp/lv-smoke/test.xlsx
+          test -s /tmp/lv-smoke/test.xlsx
+          python - <<'PY'
+          from openpyxl import load_workbook
+          wb=load_workbook('/tmp/lv-smoke/test.xlsx',read_only=True,data_only=False)
+          ws=wb['Excel Tip']
+          print('Sheets:',wb.sheetnames)
+          print('Formula cell F5:',ws['F5'].value)
+          wb.close()
+          PY
       - name: Test Edge TTS
         run: |
-          set -e
-          rm -f /tmp/learnverse_tts_test.mp3
-          python make_voice.py "Welcome to Learn Verse. Here is a quick Excel tip." /tmp/learnverse_tts_test.mp3
-          test -s /tmp/learnverse_tts_test.mp3
-          ffprobe -v error -show_entries format=duration -show_entries stream=codec_name -of default=noprint_wrappers=1 /tmp/learnverse_tts_test.mp3
+          set -eux
+          rm -f /tmp/lv-tts.mp3
+          python make_voice.py "Welcome to Learn Verse. Here is a quick Excel tip." /tmp/lv-tts.mp3
+          test -s /tmp/lv-tts.mp3
+          ffprobe -v error -show_entries format=duration -show_entries stream=codec_name -of default=noprint_wrappers=1 /tmp/lv-tts.mp3
       - name: Prepare output
         run: |
           rm -rf output
@@ -74,9 +94,9 @@ jobs:
           RUN_DATE: ${{ inputs.run_date }}
           VIDEO_COUNT: ${{ inputs.count }}
         run: |
-          set -e
+          set -eux
           COUNT="${VIDEO_COUNT:-3}"
-          if [ -n "$RUN_DATE" ]; then
+          if [ -n "${RUN_DATE:-}" ]; then
             python generate_daily.py --date "$RUN_DATE" --count "$COUNT"
           else
             python generate_daily.py --count "$COUNT"
@@ -87,22 +107,22 @@ jobs:
           find output -maxdepth 1 -type f -printf '%f\t%k KB\n' | sort || true
       - name: Validate generated files
         run: |
-          set -e
+          set -eux
           test "$(find output -maxdepth 1 -name '*.mp4' | wc -l)" -eq 3
           test "$(find output -maxdepth 1 -name '*.xlsx' | wc -l)" -eq 3
           test -s output/manifest.json
-          for file in output/*.mp4; do
-            test -s "$file"
-            ffprobe -v error -show_entries stream=codec_name,width,height -show_entries format=duration,size -of default=noprint_wrappers=1 "$file"
+          for f in output/*.mp4; do
+            test -s "$f"
+            ffprobe -v error -show_entries stream=codec_name,width,height,r_frame_rate -show_entries format=duration,size -of default=noprint_wrappers=1 "$f"
           done
-          for file in output/*.xlsx; do
-            test -s "$file"
-            python - "$file" <<'PY'
+          for f in output/*.xlsx; do
+            test -s "$f"
+            python - "$f" <<'PY'
           import sys
           from openpyxl import load_workbook
           wb=load_workbook(sys.argv[1],read_only=True,data_only=False)
           assert wb.sheetnames
-          print(sys.argv[1], wb.sheetnames)
+          print(sys.argv[1],wb.sheetnames)
           wb.close()
           PY
           done
@@ -117,3 +137,6 @@ jobs:
             output/manifest.json
           if-no-files-found: warn
           retention-days: 3
+      - name: Success
+        if: success()
+        run: echo "Learn Verse generated and validated 3 Excel Shorts successfully."
