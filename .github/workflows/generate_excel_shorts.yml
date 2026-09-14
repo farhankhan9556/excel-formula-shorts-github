@@ -1,15 +1,22 @@
 name: Daily Learn Verse Excel Shorts
 
 on:
+  # 04:00 UTC = 08:00 UAE time
   schedule:
-    # 04:00 UTC = 08:00 UAE
     - cron: "0 4 * * *"
 
+  # Allows you to run it manually from GitHub Actions
   workflow_dispatch:
     inputs:
       run_date:
-        description: "Optional YYYY-MM-DD for testing"
+        description: "Optional date for testing (YYYY-MM-DD)"
         required: false
+        type: string
+
+      count:
+        description: "Number of Shorts to generate"
+        required: false
+        default: "3"
         type: string
 
 permissions:
@@ -17,12 +24,25 @@ permissions:
 
 jobs:
   generate:
+    name: Generate 3 Excel Shorts
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+
+    # Prevent a stuck LibreOffice/FFmpeg process from running forever
+    timeout-minutes: 45
 
     steps:
+
+      # ======================================================
+      # 1. CHECKOUT REPOSITORY
+      # ======================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+
+      # ======================================================
+      # 2. SETUP PYTHON
+      # ======================================================
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -30,58 +50,433 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+
+      # ======================================================
+      # 3. INSTALL LINUX SOFTWARE
+      # ======================================================
+
       - name: Install Linux tools
         run: |
+          set -e
+
           sudo apt-get update
+
           sudo apt-get install -y \
             ffmpeg \
             libreoffice \
             xvfb \
             xdotool \
-            fonts-dejavu
+            fonts-dejavu \
+            fonts-liberation \
+            imagemagick
+
+          echo ""
+          echo "========================================"
+          echo "Linux tools installed"
+          echo "========================================"
+
+          echo ""
+          echo "FFmpeg version:"
+          ffmpeg -version | head -n 1
+
+          echo ""
+          echo "LibreOffice version:"
+          libreoffice --version
+
+          echo ""
+          echo "Xvfb version:"
+          Xvfb -version || true
+
+
+      # ======================================================
+      # 4. VERIFY FFMPEG
+      # ======================================================
+
+      - name: Verify FFmpeg filters
+        run: |
+          set -e
+
+          echo "Checking FFmpeg..."
+
+          ffmpeg -version | head -n 3
+
+          echo ""
+          echo "Checking overlay filter:"
+          ffmpeg -filters | grep -E "^[[:space:]]*[TSC.]*[[:space:]]+overlay" || true
+
+          echo ""
+          echo "Checking scale filter:"
+          ffmpeg -filters | grep -E "^[[:space:]]*[TSC.]*[[:space:]]+scale" || true
+
+          echo ""
+          echo "FFmpeg verification completed."
+
+
+      # ======================================================
+      # 5. CHECK REQUIRED REPOSITORY FILES
+      # ======================================================
+
+      - name: Check repository files
+        run: |
+          set -e
+
+          echo "Repository:"
+          pwd
+
+          echo ""
+          echo "Top-level files:"
+          ls -lah
+
+          echo ""
+          echo "Required Python files:"
+
+          test -f formula_library.py
+          test -f make_workbook.py
+          test -f record_calc.py
+          test -f make_voice.py
+          test -f render_video.py
+          test -f generate_daily.py
+          test -f requirements.txt
+
+          echo "All required Python files found."
+
+          echo ""
+          echo "Checking logo..."
+
+          test -f assets/learnverse_logo.png
+
+          echo "Logo found:"
+          ls -lh assets/learnverse_logo.png
+
+
+      # ======================================================
+      # 6. INSTALL PYTHON PACKAGES
+      # ======================================================
 
       - name: Install Python packages
         run: |
+          set -e
+
           python -m pip install --upgrade pip
+
           python -m pip install -r requirements.txt
 
-      - name: Test Edge TTS before generating videos
+          echo ""
+          echo "Installed Python packages:"
+          python -m pip list
+
+
+      # ======================================================
+      # 7. TEST PYTHON IMPORTS
+      # ======================================================
+
+      - name: Test Python modules
         run: |
+          set -e
+
+          python - <<'PY'
+          import sys
+
+          print("Python:", sys.version)
+
+          import openpyxl
+          import PIL
+          import edge_tts
+
+          print("openpyxl:", openpyxl.__version__)
+          print("Pillow:", PIL.__version__)
+          print("edge-tts:", getattr(edge_tts, "__version__", "installed"))
+
+          print("Python module test passed.")
+          PY
+
+
+      # ======================================================
+      # 8. TEST EDGE TTS
+      # ======================================================
+
+      - name: Test Edge TTS
+        run: |
+          set -e
+
+          echo "Testing AI voice generation..."
+
+          rm -f /tmp/learnverse_tts_test.mp3
+
           python make_voice.py \
-            "This is a Learn Verse Excel tip." \
-            /tmp/tts_test.mp3
-          test -s /tmp/tts_test.mp3
-          ffprobe -v error /tmp/tts_test.mp3
-          echo "TTS test passed."
+            "Welcome to Learn Verse. Here is a quick Excel tip." \
+            /tmp/learnverse_tts_test.mp3
+
+          test -s /tmp/learnverse_tts_test.mp3
+
+          echo ""
+          echo "TTS file created:"
+          ls -lh /tmp/learnverse_tts_test.mp3
+
+          echo ""
+          echo "Checking audio with FFprobe:"
+
+          ffprobe \
+            -v error \
+            -show_entries format=duration \
+            -show_entries stream=codec_name \
+            -of default=noprint_wrappers=1 \
+            /tmp/learnverse_tts_test.mp3
+
+          echo ""
+          echo "Edge TTS test PASSED."
+
+
+      # ======================================================
+      # 9. PREPARE OUTPUT DIRECTORY
+      # ======================================================
+
+      - name: Prepare output directory
+        run: |
+          set -e
+
+          rm -rf output
+
+          mkdir -p output
+
+          echo "Output directory ready:"
+          ls -lah output
+
+
+      # ======================================================
+      # 10. GENERATE 3 SHORTS
+      # ======================================================
 
       - name: Generate 3 Excel Shorts
         env:
           RUN_DATE: ${{ inputs.run_date }}
+          VIDEO_COUNT: ${{ inputs.count }}
         run: |
+          set -e
+
+          echo ""
+          echo "========================================"
+          echo "STARTING LEARN VERSE GENERATOR"
+          echo "========================================"
+
+          echo "Run date: ${RUN_DATE:-automatic}"
+          echo "Video count: ${VIDEO_COUNT:-3}"
+
           if [ -n "$RUN_DATE" ]; then
-            python generate_daily.py --date "$RUN_DATE" --count 3
+
+            echo ""
+            echo "Using requested test date:"
+            echo "$RUN_DATE"
+
+            python generate_daily.py \
+              --date "$RUN_DATE" \
+              --count "${VIDEO_COUNT:-3}"
+
           else
-            python generate_daily.py --count 3
+
+            echo ""
+            echo "Using today's date."
+
+            python generate_daily.py \
+              --count "${VIDEO_COUNT:-3}"
+
           fi
+
+          echo ""
+          echo "========================================"
+          echo "GENERATION SCRIPT FINISHED"
+          echo "========================================"
+
+
+      # ======================================================
+      # 11. SHOW GENERATED FILES
+      # ======================================================
+
+      - name: Show generated files
+        if: always()
+        run: |
+          echo ""
+          echo "========================================"
+          echo "OUTPUT DIRECTORY"
+          echo "========================================"
+
+          if [ -d output ]; then
+            find output -maxdepth 1 -type f -printf '%f\t%k KB\n' | sort
+          else
+            echo "Output directory does not exist."
+          fi
+
+          echo ""
+          echo "Detailed listing:"
+          ls -lah output/ || true
+
+
+      # ======================================================
+      # 12. VALIDATE GENERATED FILES
+      # ======================================================
 
       - name: Validate generated files
         run: |
-          echo "Generated files:"
-          ls -lh output/
+          set -e
 
-          test "$(find output -maxdepth 1 -name '*.mp4' | wc -l)" -eq 3
-          test "$(find output -maxdepth 1 -name '*.xlsx' | wc -l)" -eq 3
+          echo ""
+          echo "========================================"
+          echo "VALIDATING GENERATED FILES"
+          echo "========================================"
+
+          MP4_COUNT=$(find output -maxdepth 1 -type f -name "*.mp4" | wc -l)
+          XLSX_COUNT=$(find output -maxdepth 1 -type f -name "*.xlsx" | wc -l)
+          MP3_COUNT=$(find output -maxdepth 1 -type f -name "*.mp3" | wc -l)
+
+          echo "MP4 files : $MP4_COUNT"
+          echo "XLSX files: $XLSX_COUNT"
+          echo "MP3 files : $MP3_COUNT"
+
+          # We require exactly 3 final videos and 3 workbooks.
+          test "$MP4_COUNT" -eq 3
+          test "$XLSX_COUNT" -eq 3
+
+          # Manifest must exist.
           test -s output/manifest.json
 
-          for f in output/*.mp4; do
-            echo "Checking $f"
-            ffprobe -v error "$f"
+          echo ""
+          echo "Checking MP4 files..."
+
+          for file in output/*.mp4; do
+
+            echo ""
+            echo "----------------------------------------"
+            echo "$file"
+            echo "----------------------------------------"
+
+            test -s "$file"
+
+            ffprobe \
+              -v error \
+              -show_entries \
+              stream=codec_name,width,height,r_frame_rate \
+              -show_entries \
+              format=duration,size \
+              -of default=noprint_wrappers=1 \
+              "$file"
+
           done
 
+          echo ""
+          echo "Checking Excel workbooks..."
+
+          for file in output/*.xlsx; do
+
+            echo ""
+            echo "$file"
+
+            test -s "$file"
+
+            python - "$file" <<'PY'
+          import sys
+          from openpyxl import load_workbook
+
+          filename = sys.argv[1]
+
+          wb = load_workbook(
+              filename,
+              read_only=True,
+              data_only=False
+          )
+
+          print("Workbook:", filename)
+          print("Sheets:", wb.sheetnames)
+
+          if not wb.sheetnames:
+              raise SystemExit("Workbook has no worksheets.")
+
+          ws = wb[wb.sheetnames[0]]
+
+          print("Worksheet:", ws.title)
+          print("Max rows:", ws.max_row)
+          print("Max columns:", ws.max_column)
+
+          wb.close()
+          PY
+
+          done
+
+          echo ""
+          echo "========================================"
+          echo "VALIDATION PASSED"
+          echo "========================================"
+
+
+      # ======================================================
+      # 13. CREATE A SMALL GENERATION SUMMARY
+      # ======================================================
+
+      - name: Create generation summary
+        if: always()
+        run: |
+          echo ""
+          echo "========================================"
+          echo "LEARN VERSE GENERATION SUMMARY"
+          echo "========================================"
+
+          echo "Date:"
+          date -u
+
+          echo ""
+          echo "Repository:"
+          echo "${GITHUB_REPOSITORY}"
+
+          echo ""
+          echo "Commit:"
+          echo "${GITHUB_SHA}"
+
+          echo ""
+          echo "Generated files:"
+          find output -maxdepth 1 -type f -printf '%f\n' 2>/dev/null | sort || true
+
+          echo ""
+          echo "GitHub Actions run:"
+          echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+
+      # ======================================================
+      # 14. UPLOAD OUTPUT AS ARTIFACT
+      # ======================================================
+
       - name: Upload videos and Excel workbooks
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: learnverse-excel-shorts
-          path: output/
-          if-no-files-found: error
+          name: learnverse-excel-shorts-${{ github.run_number }}
+          path: |
+            output/*.mp4
+            output/*.xlsx
+            output/*.mp3
+            output/manifest.json
+          if-no-files-found: warn
           retention-days: 3
+
+
+      # ======================================================
+      # 15. FINAL SUCCESS MESSAGE
+      # ======================================================
+
+      - name: Generation completed
+        if: success()
+        run: |
+          echo ""
+          echo "========================================"
+          echo "SUCCESS"
+          echo "========================================"
+          echo ""
+          echo "Learn Verse generated 3 Excel Shorts."
+          echo ""
+          echo "Videos:"
+          ls -lh output/*.mp4
+          echo ""
+          echo "Excel files:"
+          ls -lh output/*.xlsx
+          echo ""
+          echo "Artifact retention: 3 days"
+          echo ""
+          echo "========================================"
