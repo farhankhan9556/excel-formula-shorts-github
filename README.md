@@ -1,68 +1,101 @@
-# Excel Formula Shorts Automation
+# Learn Verse — Real Excel Formula Shorts v2
 
-Automatically creates **3 vertical Excel formula Shorts per day** using GitHub Actions.
+Creates 3 professional 10–15 second vertical Excel Shorts per day.
 
-## What each video shows
+## What is different from v1?
 
-Each 10–15 second video:
-1. Opens an Excel-style worksheet.
-2. Types realistic work data.
-3. Selects the formula cell.
-4. Types the Excel formula.
-5. Calculates/shows the outcome.
-6. Highlights the result.
-7. Displays a short "Save this formula" ending.
+- Creates a genuine `.xlsx` workbook with OpenPyXL.
+- Uses LibreOffice Calc on the GitHub Linux runner to open the real `.xlsx` and show the actual spreadsheet UI.
+- Uses Xvfb + xdotool to automate visible data/formula entry while the real spreadsheet window is on screen.
+- Records the spreadsheet window with FFmpeg.
+- Generates natural-sounding narration with Edge TTS.
+- Adds subtitles, hook, result card, sound/transition layers, and Learn Verse branding.
+- Produces 1080x1920 MP4 files.
+- Uploads the three videos as a GitHub artifact for 3 days.
+- Generates a real `.xlsx` beside each video.
 
-The generator uses **Python + Pillow + FFmpeg**. Microsoft Excel is NOT required.
+## Important limitation
 
-## Repository structure
+GitHub-hosted Ubuntu runners cannot run Microsoft Excel desktop itself. This project therefore uses **LibreOffice Calc**, which opens and edits the genuine `.xlsx` file format.
+
+The workbook is a real Excel-compatible `.xlsx` file; the visible application is LibreOffice Calc.
+
+If you require the actual Microsoft Excel desktop UI, use a Windows self-hosted GitHub runner with Microsoft Excel installed. Do not add Microsoft Office to a normal Ubuntu GitHub-hosted runner.
+
+## Repository
 
 ```text
-excel-formula-shorts/
-├── .github/
-│   └── workflows/
-│       └── generate_excel_shorts.yml
+learnverse-excel-shorts/
+├── .github/workflows/generate_excel_shorts.yml
+├── assets/learnverse_logo.png
 ├── output/
-├── excel_formula_generator.py
 ├── formula_library.py
+├── make_workbook.py
+├── record_calc.py
+├── make_voice.py
+├── render_video.py
+├── generate_daily.py
 ├── requirements.txt
-├── .gitignore
 └── README.md
 ```
 
-## Daily schedule
+## GitHub setup
 
-The workflow runs once per day at **04:00 UTC = 08:00 UAE time**.
+1. Create a repository, e.g. `LearnVerse-Excel-Shorts`.
+2. Upload all files from this project.
+3. Make sure the workflow is exactly:
+   `.github/workflows/generate_excel_shorts.yml`
+4. Commit the files.
+5. Open **Actions**.
+6. Select **Daily Learn Verse Excel Shorts**.
+7. Click **Run workflow** for the first test.
+8. Download the `learnverse-excel-shorts` artifact after the run.
 
-It generates 3 videos in one run. The selected formulas rotate automatically by date, so the same 3 formulas are not normally repeated on consecutive days.
+The scheduled run is 04:00 UTC, which is 08:00 UAE during UAE standard time (UTC+4).
 
-You can also run it manually from:
+## Voice
 
-**GitHub → Actions → Daily Excel Formula Shorts → Run workflow**
+The workflow uses `edge-tts` and does not require a paid API key.
+
+The selected voice is a natural English male neural voice, with narration explaining the problem, formula and result. Change `VOICE` in `make_voice.py` if you prefer another available Edge voice.
+
+Because this is an online TTS service rather than a bundled offline voice, a future service change could require updating the TTS implementation.
+
+## Daily rotation
+
+`formula_library.py` contains workplace examples. `get_daily_formulas()` selects 3 formulas deterministically by date.
+
+Add more formulas to increase the rotation pool.
 
 ## Output
 
-The three MP4 files are uploaded as a GitHub Actions artifact named:
+Each run creates:
 
-`excel-formula-shorts`
-
-Artifact retention is set to **3 days**.
-
-No API key is required for video generation.
-
-## Run locally
-
-Install Python 3.11+ and FFmpeg, then:
-
-```bash
-pip install -r requirements.txt
-python excel_formula_generator.py
+```text
+excel_YYYY-MM-DD_01_<formula>.mp4
+excel_YYYY-MM-DD_01_<formula>.xlsx
+excel_YYYY-MM-DD_02_<formula>.mp4
+excel_YYYY-MM-DD_02_<formula>.xlsx
+excel_YYYY-MM-DD_03_<formula>.mp4
+excel_YYYY-MM-DD_03_<formula>.xlsx
+manifest.json
 ```
 
-The MP4 files will be created in `output/`.
+The `.xlsx` files are included so you can actually download and use the example spreadsheets.
 
-## Important
+## Local testing
 
-The formula results in this project are generated from predefined, verified examples rather than by launching Microsoft Excel. This keeps GitHub Actions free of Office licensing/dependency issues.
+Ubuntu/Debian:
 
-You can expand `formula_library.py` with more formulas and workplace examples.
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg libreoffice xvfb xdotool imagemagick fonts-dejavu
+python -m pip install -r requirements.txt
+python generate_daily.py --count 1
+```
+
+Windows local testing is not the target for the recorder in this version. Use the GitHub Action for the most consistent result.
+
+## Safety / content
+
+All formulas and example results are hard-coded and verified in the library. The video says what the formula is doing and shows the resulting value.

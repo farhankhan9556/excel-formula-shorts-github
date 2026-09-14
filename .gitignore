@@ -1,8 +1,10 @@
 __pycache__/
 *.py[cod]
 .venv/
-venv/
 .env
-.DS_Store
 output/*.mp4
+output/*.wav
 output/*.json
+output/*.xlsx
+output/*.png
+*.log
