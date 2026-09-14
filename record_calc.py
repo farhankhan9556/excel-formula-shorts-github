@@ -1,87 +1,84 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import os, subprocess, sys, time
+import os, subprocess, sys, tempfile, time
 from pathlib import Path
 
-if len(sys.argv)!=3:
-    raise SystemExit("Usage: python record_calc.py workbook.xlsx raw_video.mp4")
+DISPLAY=os.environ.get('DISPLAY', ':99')
+CAP_W=int(os.environ.get('CAPTURE_WIDTH','1365'))
+CAP_H=int(os.environ.get('CAPTURE_HEIGHT','900'))
+FPS=int(os.environ.get('CAPTURE_FPS','30'))
+SECONDS=int(os.environ.get('RECORD_SECONDS','12'))
 
-xlsx=Path(sys.argv[1]).resolve()
-video=Path(sys.argv[2]).resolve()
-display=os.environ.get("DISPLAY",":99")
-seconds=int(os.environ.get("RECORD_SECONDS","11"))
-formula=os.environ.get("EXCEL_FORMULA","")
-formula_col=int(os.environ.get("FORMULA_COL","5"))
+def quiet(cmd):
+    return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
-if not xlsx.exists():
-    raise FileNotFoundError(xlsx)
-video.parent.mkdir(parents=True,exist_ok=True)
+def capture(cmd):
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
 
-def xdotool(*args, check=False):
-    return subprocess.run(["xdotool",*args],check=check,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+def wait_window(timeout=20):
+    end=time.time()+timeout
+    while time.time()<end:
+        r=capture(['xdotool','search','--onlyvisible','--class','libreoffice'])
+        if r.returncode==0 and r.stdout.strip(): return r.stdout.splitlines()[0]
+        r=capture(['xdotool','search','--onlyvisible','--name','.*'])
+        if r.returncode==0:
+            for wid in r.stdout.splitlines():
+                n=capture(['xdotool','getwindowname',wid])
+                if n.returncode==0 and 'calc' in n.stdout.lower(): return wid
+        time.sleep(.5)
+    raise RuntimeError('LibreOffice Calc window was not detected on DISPLAY '+DISPLAY)
 
-subprocess.run(["pkill","-f","soffice"],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-time.sleep(1)
+def key(k):
+    r=capture(['xdotool','key','--clearmodifiers',k])
+    if r.returncode: raise RuntimeError('xdotool key failed: '+r.stdout)
 
-proc=subprocess.Popen(
-    ["libreoffice","--nologo","--nodefault","--norestore","--nofirststartwizard",str(xlsx)],
-    env={**os.environ,"DISPLAY":display},
-    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL
-)
+def type_text(s,delay=30):
+    r=capture(['xdotool','type','--clearmodifiers','--delay',str(delay),s])
+    if r.returncode: raise RuntimeError('xdotool type failed: '+r.stdout)
 
-try:
-    window=""
-    for _ in range(20):
-        result=subprocess.run(
-            ["xdotool","search","--onlyvisible","--class","libreoffice"],
-            env={**os.environ,"DISPLAY":display},
-            text=True,capture_output=True
-        )
-        ids=result.stdout.strip().split()
-        if ids:
-            window=ids[0]
-            break
-        time.sleep(0.5)
+def main():
+    if len(sys.argv)!=3: raise SystemExit('Usage: python record_calc.py workbook.xlsx output.mp4')
+    xlsx=Path(sys.argv[1]).resolve(); video=Path(sys.argv[2]).resolve()
+    if not xlsx.exists(): raise FileNotFoundError(xlsx)
+    video.parent.mkdir(parents=True,exist_ok=True); video.unlink(missing_ok=True)
+    formula=os.environ.get('EXCEL_FORMULA','').strip()
+    formula_col=int(os.environ.get('FORMULA_COL','5'))
+    demo_value=os.environ.get('DEMO_VALUE','')
 
-    if not window:
-        raise RuntimeError("LibreOffice Calc window was not found on Xvfb display.")
+    quiet(['pkill','-f','soffice.bin']); quiet(['pkill','-f','soffice']); time.sleep(1)
 
-    xdotool("windowactivate","--sync",window)
-    xdotool("key","alt+F10")
-    time.sleep(1)
+    ff=['ffmpeg','-hide_banner','-loglevel','warning','-y','-f','x11grab','-video_size',f'{CAP_W}x{CAP_H}','-framerate',str(FPS),'-draw_mouse','1','-i',f'{DISPLAY}.0','-t',str(SECONDS),'-c:v','libx264','-preset','veryfast','-crf','23','-pix_fmt','yuv420p',str(video)]
+    rec=subprocess.Popen(ff,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+    calc=None
+    try:
+        time.sleep(1)
+        prof=Path(tempfile.mkdtemp(prefix='lo-profile-'))
+        env=os.environ.copy(); env['DISPLAY']=DISPLAY; env['SAL_USE_VCLPLUGIN']='gen'
+        calc=subprocess.Popen(['libreoffice','--nologo','--nodefault','--norestore','--nofirststartwizard',f'-env:UserInstallation=file://{prof}',str(xlsx)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,text=True)
+        wid=wait_window()
+        quiet(['xdotool','windowactivate','--sync',wid]); quiet(['xdotool','windowraise',wid]); quiet(['xdotool','key','alt+F10']); time.sleep(1)
+        key('ctrl+home')
+        for _ in range(4): key('down')
+        if demo_value:
+            key('f2'); key('ctrl+a'); type_text(demo_value,45); key('Return'); time.sleep(.7)
+        key('ctrl+home')
+        for _ in range(4): key('down')
+        for _ in range(formula_col-1): key('right')
+        if formula:
+            key('f2'); key('ctrl+a'); type_text(formula,25); key('Return'); time.sleep(2)
+        time.sleep(max(1,SECONDS-7))
+    finally:
+        quiet(['xdotool','key','alt+F4']); time.sleep(1); quiet(['pkill','-f','soffice.bin']); quiet(['pkill','-f','soffice'])
+        try: rec.wait(timeout=12)
+        except subprocess.TimeoutExpired:
+            rec.terminate()
+            try: rec.wait(timeout=5)
+            except subprocess.TimeoutExpired: rec.kill(); rec.wait()
+    if not video.exists() or video.stat().st_size<10000:
+        out=rec.stdout.read() if rec.stdout else ''
+        raise RuntimeError(f'Calc recording was not created correctly: {video}\nFFmpeg output:\n{out}')
+    probe=capture(['ffprobe','-v','error','-show_entries','format=duration,size','-show_entries','stream=codec_name,width,height','-of','default=noprint_wrappers=1',str(video)])
+    if probe.returncode: raise RuntimeError('Recorded MP4 failed ffprobe:\n'+probe.stdout)
+    print('Calc recording validated:\n'+probe.stdout)
 
-    # Go to A5.
-    xdotool("key","ctrl+home")
-    for _ in range(4):
-        xdotool("key","down")
-    time.sleep(0.5)
-
-    # Demonstrate data entry in the first data row.
-    # Select B5 and type the existing value back in with visible keystrokes.
-    xdotool("key","right")
-    xdotool("key","f2")
-    xdotool("key","ctrl+a")
-    xdotool("type","--delay","60","92")
-    xdotool("key","Return")
-    time.sleep(0.8)
-
-    # Enter the genuine translated formula in the Formula cell F5/etc.
-    xdotool("key","ctrl+home")
-    for _ in range(4):
-        xdotool("key","down")
-    for _ in range(formula_col-1):
-        xdotool("key","right")
-    xdotool("key","f2")
-    xdotool("key","ctrl+a")
-    if formula:
-        xdotool("type","--delay","20",formula)
-        xdotool("key","Return")
-    time.sleep(max(1,seconds-5))
-finally:
-    xdotool("key","alt+F4")
-    time.sleep(1)
-    subprocess.run(["pkill","-f","soffice"],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-
-if not video.exists():
-    raise RuntimeError("The Calc recording file was not created by the FFmpeg recorder.")
-print(f"Calc automation completed: {video}")
+if __name__=='__main__': main()
