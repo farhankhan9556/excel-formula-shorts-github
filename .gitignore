@@ -1,10 +1,7 @@
 __pycache__/
-*.py[cod]
-.venv/
-.env
-output/*.mp4
-output/*.wav
-output/*.json
-output/*.xlsx
-output/*.png
-*.log
+*.pyc
+output/*
+!output/.gitkeep
+*.mp3
+*.mp4
+*.xlsx

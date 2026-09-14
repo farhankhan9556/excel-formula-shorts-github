@@ -6,7 +6,7 @@ FORMULAS = [
         "problem": "Need Excel to mark employees as PASS or REVIEW?",
         "title": "Automatically mark PASS or REVIEW",
         "headers": ["Employee", "Score", "Status"],
-        "rows": [["Ahmed", "92", ""], ["Sara", "71", ""], ["Ali", "88", ""]],
+        "rows": [["Ahmed", 92, ""], ["Sara", 71, ""], ["Ali", 88, ""]],
         "formula": '=IF(B2>=80,"Pass","Review")',
         "result": "Pass",
         "explanation": "IF checks the score and returns the correct status.",
@@ -17,7 +17,7 @@ FORMULAS = [
         "problem": "Need to find an employee salary from an ID?",
         "title": "Find data instantly with XLOOKUP",
         "headers": ["Employee", "ID", "Department", "Salary"],
-        "rows": [["Ahmed", "E102", "HSE", "8500"], ["Sara", "E103", "HR", "9200"], ["Ali", "E104", "Finance", "10500"]],
+        "rows": [["Ahmed", "E102", "HSE", 8500], ["Sara", "E103", "HR", 9200], ["Ali", "E104", "Finance", 10500]],
         "formula": '=XLOOKUP("E103",B2:B4,D2:D4)',
         "result": "9200",
         "explanation": "XLOOKUP finds the ID and returns the matching salary.",
@@ -28,7 +28,7 @@ FORMULAS = [
         "problem": "Need the total overtime amount for one department?",
         "title": "Total overtime with SUMIFS",
         "headers": ["Employee", "Dept", "OT Hours", "Rate", "OT Amount"],
-        "rows": [["Ahmed", "HSE", "8", "50", "400"], ["Sara", "HR", "5", "50", "250"], ["Ali", "HSE", "6", "50", "300"]],
+        "rows": [["Ahmed", "HSE", 8, 50, 400], ["Sara", "HR", 5, 50, 250], ["Ali", "HSE", 6, 50, 300]],
         "formula": '=SUMIFS(E2:E4,B2:B4,"HSE")',
         "result": "700",
         "explanation": "SUMIFS adds only the amounts that match HSE.",
@@ -50,7 +50,7 @@ FORMULAS = [
         "problem": "Want to stop ugly division errors in reports?",
         "title": "Clean errors with IFERROR",
         "headers": ["Sales", "Target", "Achievement"],
-        "rows": [["10000", "10000", ""], ["7500", "0", ""], ["9000", "10000", ""]],
+        "rows": [[10000, 10000, ""], [7500, 0, ""], [9000, 10000, ""]],
         "formula": '=IFERROR(A2/B2,0)',
         "result": "100%",
         "explanation": "IFERROR returns a safe value instead of an error.",
@@ -105,7 +105,7 @@ FORMULAS = [
         "problem": "Need clean numbers with two decimal places?",
         "title": "Round numbers with ROUND",
         "headers": ["Amount", "Rounded"],
-        "rows": [["1254.678", ""], ["987.456", ""], ["42.995", ""]],
+        "rows": [[1254.678, ""], [987.456, ""], [42.995, ""]],
         "formula": "=ROUND(A2,2)",
         "result": "1254.68",
         "explanation": "ROUND keeps the number to two decimal places.",
@@ -116,7 +116,7 @@ FORMULAS = [
         "problem": "Need the highest sales value for one department?",
         "title": "Find the highest value with MAXIFS",
         "headers": ["Employee", "Dept", "Sales"],
-        "rows": [["Ahmed", "HSE", "12000"], ["Sara", "HR", "15000"], ["Ali", "HSE", "18000"], ["Omar", "HSE", "14000"]],
+        "rows": [["Ahmed", "HSE", 12000], ["Sara", "HR", 15000], ["Ali", "HSE", 18000], ["Omar", "HSE", 14000]],
         "formula": '=MAXIFS(C2:C5,B2:B5,"HSE")',
         "result": "18000",
         "explanation": "MAXIFS finds the largest value that meets a condition.",
@@ -131,7 +131,7 @@ FORMULAS = [
         "formula": "=UNIQUE(A2:A5)",
         "result": "HSE, HR, Finance",
         "explanation": "UNIQUE creates a list containing each value once.",
-        "voice": "Need a list without duplicate departments? Use UNIQUE. Excel automatically creates a list containing each department once. Follow Learn Verse for more Excel tips."
+        "voice": "Need a list without duplicate departments? Use UNIQUE. Excel automatically creates a list containing each department once. Use it to clean a list quickly. Follow Learn Verse for more Excel tips."
     },
     {
         "id": "filter",
@@ -147,6 +147,8 @@ FORMULAS = [
 ]
 
 def get_daily_formulas(run_date: date, count=3):
-    offset = (run_date - date(2026, 1, 1)).days * count
-    n = len(FORMULAS)
-    return [FORMULAS[(offset + i) % n] for i in range(count)]
+    if count < 1 or count > len(FORMULAS):
+        raise ValueError(f"count must be between 1 and {len(FORMULAS)}")
+    days = (run_date - date(2026, 1, 1)).days
+    offset = (days * 3) % len(FORMULAS)
+    return [FORMULAS[(offset + i) % len(FORMULAS)] for i in range(count)]

@@ -1,51 +1,32 @@
-# Learn Verse Excel Shorts — TTS Fix
+# Learn Verse Excel Shorts — Stable GitHub Automation
 
-Replace the existing files with the files in this patch.
-
-## Why the previous run failed
-
-The GitHub log shows the failure occurred in:
-
-`make_voice.py`
-
-before video rendering and artifact upload.
-
-This patch makes TTS much more robust and adds a separate TTS test step. If the TTS service is unavailable, the workflow will stop at the TTS test instead of wasting time generating spreadsheets/videos.
-
-## Files to replace
-
-```text
-make_voice.py
-requirements.txt
-.github/workflows/generate_excel_shorts.yml
-```
-
-Keep the rest of your current repository unchanged for this test.
+This repository generates 3 Excel Shorts per day.
 
 ## Important
+Keep the existing logo at:
 
-Keep your logo at:
+`assets/learnverse_logo.png`
 
-```text
-assets/learnverse_logo.png
-```
+The workflow uses LibreOffice Calc on a real `.xlsx` workbook and FFmpeg/Xvfb to record the spreadsheet screen.
 
-## Test
+## Daily schedule
+The workflow runs at `04:00 UTC`, which is `08:00 UAE`.
 
-After committing the three replacement files:
+## Manual test
+GitHub → Actions → Daily Learn Verse Excel Shorts → Run workflow.
 
-1. GitHub → Actions
-2. Daily Learn Verse Excel Shorts
-3. Run workflow
-4. Leave `run_date` empty
-5. Run workflow
+Use:
+- `run_date`: `2026-09-14`
+- `count`: `3`
 
-The first step to check is:
+## Output
+Each successful run creates:
+- 3 MP4 Shorts
+- 3 Excel workbooks
+- `manifest.json`
 
-`Test Edge TTS before generating videos`
+Artifacts are retained for 3 days.
 
-It must show:
-
-`TTS test passed.`
-
-Then the workflow will proceed to generate the 3 videos.
+## Do not delete
+Keep:
+`assets/learnverse_logo.png`
