@@ -1,13 +1,13 @@
-name: Daily Excel Formula Shorts
+name: Daily Learn Verse Excel Shorts
 
 on:
   schedule:
-    # 04:00 UTC = 08:00 UAE time
+    # 04:00 UTC = 08:00 UAE
     - cron: "0 4 * * *"
   workflow_dispatch:
     inputs:
       run_date:
-        description: "Optional date YYYY-MM-DD. Leave blank for today."
+        description: "Optional YYYY-MM-DD. Leave blank for today's rotation."
         required: false
         type: string
 
@@ -17,7 +17,7 @@ permissions:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout repository
@@ -29,35 +29,42 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install FFmpeg
+      - name: Install Linux video/spreadsheet tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y \
+            ffmpeg \
+            libreoffice \
+            xvfb \
+            xdotool \
+            fonts-dejavu
 
       - name: Install Python packages
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Generate 3 Excel Shorts
+      - name: Generate 3 real-spreadsheet Excel Shorts
         env:
           RUN_DATE: ${{ inputs.run_date }}
         run: |
           if [ -n "$RUN_DATE" ]; then
-            python excel_formula_generator.py --date "$RUN_DATE" --count 3
+            python generate_daily.py --date "$RUN_DATE" --count 3
           else
-            python excel_formula_generator.py --count 3
+            python generate_daily.py --count 3
           fi
 
-      - name: Check generated files
+      - name: Validate output
         run: |
+          echo "Generated files:"
           ls -lh output/
           test "$(find output -maxdepth 1 -name '*.mp4' | wc -l)" -eq 3
+          test "$(find output -maxdepth 1 -name '*.xlsx' | wc -l)" -eq 3
 
-      - name: Upload videos as artifact
+      - name: Upload videos and Excel workbooks
         uses: actions/upload-artifact@v4
         with:
-          name: excel-formula-shorts
+          name: learnverse-excel-shorts
           path: output/
           if-no-files-found: error
           retention-days: 3
