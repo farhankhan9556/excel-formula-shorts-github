@@ -1,32 +1,35 @@
-# Learn Verse Excel Shorts — Stable GitHub Automation
+# Learn Verse — Excel Reference-Style Shorts V4
 
-This repository generates 3 Excel Shorts per day.
+This version is designed to reproduce the visual language of the supplied reference:
+- vertical 1080x1920 output
+- approximately 30 seconds
+- Microsoft Excel Desktop visible
+- real spreadsheet cells and real Excel Form Controls
+- visible mouse/click actions
+- timed bottom captions
+- AI/TTS narration
+- Learn Verse branding
+- automatic daily rotation
 
-## Important
-Keep the existing logo at:
+## Important architecture
 
-`assets/learnverse_logo.png`
+Microsoft Excel Desktop is Windows software. GitHub-hosted Ubuntu runners cannot provide the real Excel Desktop interface.
 
-The workflow uses LibreOffice Calc on a real `.xlsx` workbook and FFmpeg/Xvfb to record the spreadsheet screen.
+For this V4 setup, GitHub Actions must run on a Windows self-hosted runner/Windows VM that has:
+1. Microsoft Excel Desktop installed and activated
+2. Python 3
+3. FFmpeg in PATH
+4. A logged-in Windows desktop session
+5. GitHub Actions self-hosted runner installed with labels `self-hosted,windows,excel`
 
-## Daily schedule
-The workflow runs at `04:00 UTC`, which is `08:00 UAE`.
+## First test
 
-## Manual test
-GitHub → Actions → Daily Learn Verse Excel Shorts → Run workflow.
+Run the workflow manually with:
+run_date = 2026-09-14
+count = 1
 
-Use:
-- `run_date`: `2026-09-14`
-- `count`: `3`
+Use count=1 for the first test so the Excel UI automation can be verified before running all 3.
 
-## Output
-Each successful run creates:
-- 3 MP4 Shorts
-- 3 Excel workbooks
-- `manifest.json`
+## Note about exact content
 
-Artifacts are retained for 3 days.
-
-## Do not delete
-Keep:
-`assets/learnverse_logo.png`
+The system recreates the reference's presentation style and interaction pattern. It does not copy the reference video's exact frames/audio/text.

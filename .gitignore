@@ -3,5 +3,4 @@ __pycache__/
 output/*
 !output/.gitkeep
 *.mp3
-*.mp4
-*.xlsx
+*_raw.mp4
