@@ -121,14 +121,14 @@ jobs:
           set -eux
           rm -f /tmp/lv-display-test.mp4
           xvfb-run -a \
-            --server-args="-screen 0 1365x900x24 -ac" \
+            --server-args="-screen 0 1364x900x24 -ac" \
             bash -lc '
               set -eux
               echo "DISPLAY=$DISPLAY"
               xdpyinfo >/dev/null
               ffmpeg -hide_banner -loglevel error -y \
                 -f x11grab \
-                -video_size 1365x900 \
+                -video_size 1364x900 \
                 -framerate 10 \
                 -i "$DISPLAY.0" \
                 -t 2 \
@@ -154,11 +154,11 @@ jobs:
           COUNT="${VIDEO_COUNT:-3}"
           if [ -n "${RUN_DATE:-}" ]; then
             xvfb-run -a \
-              --server-args="-screen 0 1365x900x24 -ac" \
+              --server-args="-screen 0 1364x900x24 -ac" \
               python generate_daily.py --date "$RUN_DATE" --count "$COUNT"
           else
             xvfb-run -a \
-              --server-args="-screen 0 1365x900x24 -ac" \
+              --server-args="-screen 0 1364x900x24 -ac" \
               python generate_daily.py --count "$COUNT"
           fi
 
