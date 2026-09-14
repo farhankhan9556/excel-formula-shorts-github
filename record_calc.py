@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 DISPLAY = os.environ.get("DISPLAY", ":99")
-WIDTH = int(os.environ.get("CAPTURE_WIDTH", "1365"))
+WIDTH = int(os.environ.get("CAPTURE_WIDTH", "1364"))
 HEIGHT = int(os.environ.get("CAPTURE_HEIGHT", "900"))
 FPS = int(os.environ.get("CAPTURE_FPS", "30"))
 SECONDS = int(os.environ.get("RECORD_SECONDS", "15"))

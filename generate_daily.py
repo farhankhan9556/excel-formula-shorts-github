@@ -74,7 +74,7 @@ def main():
             "FORMULA_COL": str(len(item["headers"]) + 2),
             "DEMO_VALUE": str(item["rows"][0][0]) if item["rows"] else "Learn Verse",
             "RECORD_SECONDS": "15",
-            "CAPTURE_WIDTH": "1365",
+            "CAPTURE_WIDTH": "1364",
             "CAPTURE_HEIGHT": "900",
             "CAPTURE_FPS": "30",
         })
