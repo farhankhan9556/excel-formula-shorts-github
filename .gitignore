@@ -1,6 +1,8 @@
 __pycache__/
 *.pyc
-output/*
-!output/.gitkeep
-*.mp3
-*_raw.mp4
+output/*.mp4
+output/*.xlsx
+output/*.mp3
+output/*_raw.mp4
+work/
+*.log
