@@ -1,259 +1,66 @@
 name: Learn Verse Excel Shorts
-
 on:
   workflow_dispatch:
     inputs:
       run_date:
-        description: "Date for videos (YYYY-MM-DD)"
+        description: "Date YYYY-MM-DD"
         required: false
         default: ""
       count:
         description: "Number of Shorts"
         required: true
-        default: "3"
+        default: "1"
         type: choice
-        options:
-          - "1"
-          - "2"
-          - "3"
-
+        options: ["1","2","3"]
   schedule:
-    # 08:00 UAE time = 04:00 UTC
     - cron: "0 4 * * *"
-
 permissions:
   contents: read
-
 jobs:
-
   generate:
-    name: Generate Excel Shorts
     runs-on: [self-hosted, windows, excel]
-
     timeout-minutes: 90
-
     steps:
-
-      # --------------------------------------------------
-      # CHECKOUT
-      # --------------------------------------------------
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-
-      # --------------------------------------------------
-      # SYSTEM CHECK
-      # --------------------------------------------------
-
-      - name: Check Windows
+      - uses: actions/checkout@v4
+      - name: System check
         shell: powershell
         run: |
-          Write-Host "======================================"
-          Write-Host "WINDOWS SYSTEM CHECK"
-          Write-Host "======================================"
-
-          Write-Host "Computer:"
-          $env:COMPUTERNAME
-
-          Write-Host ""
-          Write-Host "User:"
-          $env:USERNAME
-
-          Write-Host ""
-          Write-Host "Python:"
           python --version
-
-          Write-Host ""
-          Write-Host "FFmpeg:"
           ffmpeg -version | Select-Object -First 1
-
-
-      # --------------------------------------------------
-      # CHECK EXCEL
-      # --------------------------------------------------
-
-      - name: Check Microsoft Excel
+          $e=New-Object -ComObject Excel.Application
+          Write-Host "Excel $($e.Version) detected"
+          $e.Quit()
+      - name: Install dependencies
         shell: powershell
-        run: |
-          Write-Host "Checking Microsoft Excel..."
-
-          $excel = $null
-
-          try {
-
-              $excel = New-Object -ComObject Excel.Application
-
-              Write-Host "Excel detected successfully."
-              Write-Host "Excel version: $($excel.Version)"
-
-              $excel.Quit()
-
-          }
-          catch {
-
-              Write-Error "Microsoft Excel Desktop was not found."
-              exit 1
-          }
-
-          if ($excel) {
-
-              [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) |
-                  Out-Null
-          }
-
-
-      # --------------------------------------------------
-      # PYTHON DEPENDENCIES
-      # --------------------------------------------------
-
-      - name: Install Python dependencies
-        shell: powershell
-        run: |
-
-          python -m pip install --upgrade pip
-
-          python -m pip install -r requirements.txt
-
-
-      # --------------------------------------------------
-      # CREATE OUTPUT FOLDERS
-      # --------------------------------------------------
-
-      - name: Prepare output
-        shell: powershell
-        run: |
-
-          if (Test-Path "output") {
-
-              Remove-Item "output\*" -Recurse -Force -ErrorAction SilentlyContinue
-          }
-
-          New-Item -ItemType Directory -Force -Path "output" | Out-Null
-
-          New-Item -ItemType Directory -Force -Path "work" | Out-Null
-
-
-      # --------------------------------------------------
-      # GENERATE VIDEOS
-      # --------------------------------------------------
-
-      - name: Generate Excel Shorts
+        run: python -m pip install -r requirements.txt
+      - name: Generate
         shell: powershell
         env:
           RUN_DATE: ${{ inputs.run_date }}
           VIDEO_COUNT: ${{ inputs.count }}
         run: |
-
-          Write-Host "======================================"
-          Write-Host "LEARN VERSE EXCEL SHORTS"
-          Write-Host "======================================"
-
-          Write-Host "Date: $env:RUN_DATE"
-          Write-Host "Count: $env:VIDEO_COUNT"
-
-          $arguments = @()
-
-          if ($env:RUN_DATE -and $env:RUN_DATE.Trim() -ne "") {
-
-              $arguments += "--date"
-              $arguments += $env:RUN_DATE
-          }
-
-          $arguments += "--count"
-          $arguments += $env:VIDEO_COUNT
-
-          python generate_windows.py @arguments
-
-
-      # --------------------------------------------------
-      # VERIFY OUTPUT
-      # --------------------------------------------------
-
-      - name: Verify generated files
+          if (-not $env:VIDEO_COUNT) { $env:VIDEO_COUNT="3" }
+          $args=@("--count",$env:VIDEO_COUNT)
+          if ($env:RUN_DATE) { $args += @("--date",$env:RUN_DATE) }
+          python excel_runner.py @args
+      - name: Validate
         shell: powershell
         run: |
-
-          Write-Host "======================================"
-          Write-Host "VERIFYING OUTPUT"
-          Write-Host "======================================"
-
-          $videos = @(Get-ChildItem "output\*.mp4" -ErrorAction SilentlyContinue)
-          $workbooks = @(Get-ChildItem "output\*.xlsx" -ErrorAction SilentlyContinue)
-
-          Write-Host "Videos: $($videos.Count)"
-          Write-Host "Excel files: $($workbooks.Count)"
-
-          if ($videos.Count -lt 1) {
-
-              Write-Error "No MP4 videos were generated."
-              exit 1
-          }
-
-          foreach ($video in $videos) {
-
-              Write-Host ""
-              Write-Host "Checking $($video.Name)"
-
-              if ($video.Length -lt 100000) {
-
-                  Write-Error "$($video.Name) is suspiciously small."
-                  exit 1
-              }
-
-              Write-Host "Size: $([math]::Round($video.Length / 1MB, 2)) MB"
-          }
-
-          Write-Host ""
-          Write-Host "OUTPUT VALIDATION PASSED."
-
-
-      # --------------------------------------------------
-      # LIST OUTPUT
-      # --------------------------------------------------
-
-      - name: List generated files
-        shell: powershell
-        run: |
-
-          Write-Host ""
-          Write-Host "======================================"
-          Write-Host "GENERATED FILES"
-          Write-Host "======================================"
-
-          Get-ChildItem "output" |
-              Select-Object Name, Length, LastWriteTime |
-              Format-Table -AutoSize
-
-
-      # --------------------------------------------------
-      # UPLOAD ARTIFACT
-      # --------------------------------------------------
-
-      - name: Upload generated Shorts
+          $v=@(Get-ChildItem output\*.mp4)
+          $x=@(Get-ChildItem output\*.xlsx)
+          if ($v.Count -lt 1) { throw "No MP4 generated" }
+          if ($x.Count -lt 1) { throw "No XLSX generated" }
+          $v | Select Name,Length | Format-Table -AutoSize
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: learnverse-excel-shorts-${{ github.run_number }}
           path: output/*
-          if-no-files-found: error
           retention-days: 3
-
-
-      # --------------------------------------------------
-      # CLEAN WORKSPACE
-      # --------------------------------------------------
-
+          if-no-files-found: error
       - name: Cleanup
         if: always()
         shell: powershell
         run: |
-
-          Write-Host "Cleaning temporary files..."
-
-          Get-ChildItem "work" -ErrorAction SilentlyContinue |
-              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
-          Get-ChildItem "__pycache__" -ErrorAction SilentlyContinue |
-              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
-          Write-Host "Cleanup completed."
+          Remove-Item work -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item __pycache__ -Recurse -Force -ErrorAction SilentlyContinue
