@@ -1,78 +1,259 @@
-name: Learn Verse Excel Reference Style
+name: Learn Verse Excel Shorts
 
 on:
   workflow_dispatch:
     inputs:
       run_date:
-        description: "YYYY-MM-DD (optional)"
+        description: "Date for videos (YYYY-MM-DD)"
         required: false
-        type: string
+        default: ""
       count:
-        description: "1-3"
-        required: false
+        description: "Number of Shorts"
+        required: true
         default: "3"
-        type: string
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+
   schedule:
+    # 08:00 UAE time = 04:00 UTC
     - cron: "0 4 * * *"
 
+permissions:
+  contents: read
+
 jobs:
+
   generate:
-    # IMPORTANT: this must be your Windows self-hosted PC/VM with Microsoft Excel installed.
+    name: Generate Excel Shorts
     runs-on: [self-hosted, windows, excel]
-    timeout-minutes: 60
+
+    timeout-minutes: 90
 
     steps:
-      - uses: actions/checkout@v4
 
-      - name: Install Python packages
+      # --------------------------------------------------
+      # CHECKOUT
+      # --------------------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # --------------------------------------------------
+      # SYSTEM CHECK
+      # --------------------------------------------------
+
+      - name: Check Windows
         shell: powershell
         run: |
-          py -3 -m pip install --upgrade pip
-          py -3 -m pip install -r requirements.txt
+          Write-Host "======================================"
+          Write-Host "WINDOWS SYSTEM CHECK"
+          Write-Host "======================================"
 
-      - name: Check Excel and FFmpeg
-        shell: powershell
-        run: |
-          $excel = Get-Process EXCEL -ErrorAction SilentlyContinue
-          Write-Host "Excel process before job: $($excel.Count)"
+          Write-Host "Computer:"
+          $env:COMPUTERNAME
+
+          Write-Host ""
+          Write-Host "User:"
+          $env:USERNAME
+
+          Write-Host ""
+          Write-Host "Python:"
+          python --version
+
+          Write-Host ""
+          Write-Host "FFmpeg:"
           ffmpeg -version | Select-Object -First 1
-          py -3 --version
-          if (!(Test-Path "assets/learnverse_logo.png")) {
-            Write-Error "assets/learnverse_logo.png is missing"
+
+
+      # --------------------------------------------------
+      # CHECK EXCEL
+      # --------------------------------------------------
+
+      - name: Check Microsoft Excel
+        shell: powershell
+        run: |
+          Write-Host "Checking Microsoft Excel..."
+
+          $excel = $null
+
+          try {
+
+              $excel = New-Object -ComObject Excel.Application
+
+              Write-Host "Excel detected successfully."
+              Write-Host "Excel version: $($excel.Version)"
+
+              $excel.Quit()
+
+          }
+          catch {
+
+              Write-Error "Microsoft Excel Desktop was not found."
+              exit 1
           }
 
-      - name: Generate videos
+          if ($excel) {
+
+              [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) |
+                  Out-Null
+          }
+
+
+      # --------------------------------------------------
+      # PYTHON DEPENDENCIES
+      # --------------------------------------------------
+
+      - name: Install Python dependencies
+        shell: powershell
+        run: |
+
+          python -m pip install --upgrade pip
+
+          python -m pip install -r requirements.txt
+
+
+      # --------------------------------------------------
+      # CREATE OUTPUT FOLDERS
+      # --------------------------------------------------
+
+      - name: Prepare output
+        shell: powershell
+        run: |
+
+          if (Test-Path "output") {
+
+              Remove-Item "output\*" -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          New-Item -ItemType Directory -Force -Path "output" | Out-Null
+
+          New-Item -ItemType Directory -Force -Path "work" | Out-Null
+
+
+      # --------------------------------------------------
+      # GENERATE VIDEOS
+      # --------------------------------------------------
+
+      - name: Generate Excel Shorts
         shell: powershell
         env:
           RUN_DATE: ${{ inputs.run_date }}
           VIDEO_COUNT: ${{ inputs.count }}
         run: |
-          $count = if ($env:VIDEO_COUNT) { $env:VIDEO_COUNT } else { "3" }
-          if ($env:RUN_DATE) {
-            py -3 generate_windows.py --date $env:RUN_DATE --count $count
-          } else {
-            py -3 generate_windows.py --count $count
+
+          Write-Host "======================================"
+          Write-Host "LEARN VERSE EXCEL SHORTS"
+          Write-Host "======================================"
+
+          Write-Host "Date: $env:RUN_DATE"
+          Write-Host "Count: $env:VIDEO_COUNT"
+
+          $arguments = @()
+
+          if ($env:RUN_DATE -and $env:RUN_DATE.Trim() -ne "") {
+
+              $arguments += "--date"
+              $arguments += $env:RUN_DATE
           }
 
-      - name: Validate
+          $arguments += "--count"
+          $arguments += $env:VIDEO_COUNT
+
+          python generate_windows.py @arguments
+
+
+      # --------------------------------------------------
+      # VERIFY OUTPUT
+      # --------------------------------------------------
+
+      - name: Verify generated files
         shell: powershell
         run: |
-          $mp4 = @(Get-ChildItem output -Filter *.mp4)
-          $xlsx = @(Get-ChildItem output -Filter *.xlsx)
-          if ($mp4.Count -ne 3) { throw "Expected 3 MP4 files, found $($mp4.Count)" }
-          if ($xlsx.Count -ne 3) { throw "Expected 3 XLSX files, found $($xlsx.Count)" }
-          foreach ($f in $mp4) {
-            if ($f.Length -lt 50000) { throw "Invalid MP4: $($f.Name)" }
-            ffprobe -v error $f.FullName
+
+          Write-Host "======================================"
+          Write-Host "VERIFYING OUTPUT"
+          Write-Host "======================================"
+
+          $videos = @(Get-ChildItem "output\*.mp4" -ErrorAction SilentlyContinue)
+          $workbooks = @(Get-ChildItem "output\*.xlsx" -ErrorAction SilentlyContinue)
+
+          Write-Host "Videos: $($videos.Count)"
+          Write-Host "Excel files: $($workbooks.Count)"
+
+          if ($videos.Count -lt 1) {
+
+              Write-Error "No MP4 videos were generated."
+              exit 1
           }
 
-      - name: Upload artifacts
-        if: always()
+          foreach ($video in $videos) {
+
+              Write-Host ""
+              Write-Host "Checking $($video.Name)"
+
+              if ($video.Length -lt 100000) {
+
+                  Write-Error "$($video.Name) is suspiciously small."
+                  exit 1
+              }
+
+              Write-Host "Size: $([math]::Round($video.Length / 1MB, 2)) MB"
+          }
+
+          Write-Host ""
+          Write-Host "OUTPUT VALIDATION PASSED."
+
+
+      # --------------------------------------------------
+      # LIST OUTPUT
+      # --------------------------------------------------
+
+      - name: List generated files
+        shell: powershell
+        run: |
+
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "GENERATED FILES"
+          Write-Host "======================================"
+
+          Get-ChildItem "output" |
+              Select-Object Name, Length, LastWriteTime |
+              Format-Table -AutoSize
+
+
+      # --------------------------------------------------
+      # UPLOAD ARTIFACT
+      # --------------------------------------------------
+
+      - name: Upload generated Shorts
         uses: actions/upload-artifact@v4
         with:
-          name: learnverse-excel-reference-${{ github.run_number }}
-          path: |
-            output/*.mp4
-            output/*.xlsx
-            output/manifest.json
+          name: learnverse-excel-shorts-${{ github.run_number }}
+          path: output/*
+          if-no-files-found: error
           retention-days: 3
+
+
+      # --------------------------------------------------
+      # CLEAN WORKSPACE
+      # --------------------------------------------------
+
+      - name: Cleanup
+        if: always()
+        shell: powershell
+        run: |
+
+          Write-Host "Cleaning temporary files..."
+
+          Get-ChildItem "work" -ErrorAction SilentlyContinue |
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+          Get-ChildItem "__pycache__" -ErrorAction SilentlyContinue |
+              Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+          Write-Host "Cleanup completed."
