@@ -21,6 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 # ============================================================
 # LEARN VERSE - EXCEL SHORTS GENERATOR
+# Design: Excel Quick Tip / branded educational layout v2
 # Self-contained Windows + GitHub Actions version
 # ============================================================
 
@@ -42,7 +43,6 @@ pyautogui.FAILSAFE = False
 VOICE_LIST = [
     "en-US-JennyNeural",
     "en-US-AriaNeural",
-    "en-US-SaraNeural",
 ]
 VOICE_RATES = ["+8%", "+12%", "+16%", "+20%"]
 VOICE_VOLUME = "+0%"
@@ -537,20 +537,10 @@ def build_excel_workbook(topic, workbook_path: Path):
             write_cell(sheet, row_index, col_index, value)
 
     # Formula demonstration row.
-    demo_row = 12
-
-    sheet.Range(f"A{demo_row}:F{demo_row}").Merge()
-    sheet.Range(f"A{demo_row}").Value = "FORMULA DEMO"
-    sheet.Range(f"A{demo_row}").Font.Bold = True
-    sheet.Range(f"A{demo_row}").Font.Size = 14
-
+    # The formula/result is deliberately placed on row 11 so it remains
+    # visible in the recorded Excel area after the six data rows.
     formula_cell = topic["formula_cell"]
-
-    # Translate row-2 formulas to the actual demo row where possible.
     formula = topic["formula"]
-
-    if "2" in formula:
-        formula = formula.replace("2", str(demo_row + 1))
 
     if topic["id"] == "sum":
         formula = "=SUM(F5:F10)"
@@ -588,34 +578,119 @@ def build_excel_workbook(topic, workbook_path: Path):
     elif topic["id"] == "xlookup":
         formula = '=XLOOKUP(A5,A5:A10,F5:F10,"Not Found")'
 
-    # Use G13 for most final results so A:G remains visible.
-    result_cell = sheet.Range("G13")
+    # Put the live formula/result immediately below the six data rows.
+    # This keeps the formula cell visible inside the recorded Excel area.
+    formula_row = 11
+    result_cell = sheet.Range(f"G{formula_row}")
     result_cell.Formula = formula
 
-    sheet.Range("F13").Value = "Formula:"
-    sheet.Range("F13").Font.Bold = True
+    sheet.Range(f"F{formula_row}").Value = "Formula:"
+    sheet.Range(f"F{formula_row}").Font.Bold = True
 
-    sheet.Range("A15:G15").Merge()
-    sheet.Range("A15").Value = topic["explanation"]
-    sheet.Range("A15").WrapText = True
+    # Compact explanation row so more of the worksheet remains visible.
+    sheet.Range("A12:G12").Merge()
+    sheet.Range("A12").Value = topic["explanation"]
+    sheet.Range("A12").WrapText = True
 
-    # Formatting.
-    sheet.Range("A4:G10").Borders.LineStyle = 1
-    sheet.Range("A4:G4").Font.Bold = True
+    # --------------------------------------------------------
+    # Professional Excel formatting
+    # --------------------------------------------------------
+    # Keep the complete working area A:G visible and hide all
+    # columns to the right so the recording cannot drift into H+.
+    try:
+        sheet.Columns("H:XFD").Hidden = True
+    except Exception:
+        pass
 
-    for col in range(1, 8):
-        sheet.Columns(col).ColumnWidth = 16
+    # Thin, professional table borders.
+    table_range = sheet.Range("A4:G10")
+    table_range.Borders.LineStyle = 1
+    table_range.Borders.Weight = 2
 
-    sheet.Columns(1).ColumnWidth = 18
-    sheet.Columns(2).ColumnWidth = 17
-    sheet.Columns(3).ColumnWidth = 15
-    sheet.Columns(4).ColumnWidth = 14
-    sheet.Columns(5).ColumnWidth = 15
-    sheet.Columns(6).ColumnWidth = 15
-    sheet.Columns(7).ColumnWidth = 18
+    # Center all table content horizontally and vertically.
+    table_range.HorizontalAlignment = -4108  # xlCenter
+    table_range.VerticalAlignment = -4108    # xlCenter
 
-    sheet.Rows(1).RowHeight = 30
-    sheet.Rows(2).RowHeight = 32
+    # Header styling.
+    header_range = sheet.Range("A4:G4")
+    header_range.Font.Bold = True
+    header_range.Font.Size = 10
+    header_range.HorizontalAlignment = -4108
+    header_range.VerticalAlignment = -4108
+
+    # Compact readable fonts.
+    sheet.Range("A1:G1").Font.Size = 14
+    sheet.Range("A2:G2").Font.Size = 9
+    sheet.Range("A5:G10").Font.Size = 10
+    sheet.Range("F11:G11").Font.Size = 9
+    sheet.Range("A12:G12").Font.Size = 8
+
+    # Professional blue/green table palette.
+    header_range.Interior.Color = 0xD07A08
+    header_range.Font.Color = 0xFFFFFF
+
+    # Alternating data rows.
+    for r in range(5, 11):
+        row_range = sheet.Range(f"A{r}:G{r}")
+        if r % 2 == 1:
+            row_range.Interior.Color = 0xF2F7FC
+        else:
+            row_range.Interior.Color = 0xFFFFFF
+
+    # Color-code Status (column C) and Priority (column D).
+    for r in range(5, 11):
+        status = str(sheet.Cells(r, 3).Value or "").strip().lower()
+        priority = str(sheet.Cells(r, 4).Value or "").strip().lower()
+
+        if status == "done":
+            sheet.Cells(r, 3).Interior.Color = 0xD9F2E3
+            sheet.Cells(r, 3).Font.Color = 0x246B3A
+            sheet.Cells(r, 3).Font.Bold = True
+        elif status == "pending":
+            sheet.Cells(r, 3).Interior.Color = 0xD9EAF7
+            sheet.Cells(r, 3).Font.Color = 0x8A5A00
+            sheet.Cells(r, 3).Font.Bold = True
+
+        if priority == "high":
+            sheet.Cells(r, 4).Interior.Color = 0xD9D9FF
+            sheet.Cells(r, 4).Font.Bold = True
+        elif priority == "medium":
+            sheet.Cells(r, 4).Interior.Color = 0xFFF0C2
+            sheet.Cells(r, 4).Font.Bold = True
+        elif priority == "low":
+            sheet.Cells(r, 4).Interior.Color = 0xDCEBFF
+            sheet.Cells(r, 4).Font.Bold = True
+
+    # Formula row: clearly visible and centered.
+    sheet.Range("F11:G11").Interior.Color = 0xD9F2E3
+    sheet.Range("F11:G11").Borders.LineStyle = 1
+    sheet.Range("F11:G11").Borders.Weight = 2
+    sheet.Range("F11:G11").HorizontalAlignment = -4108
+    sheet.Range("F11:G11").VerticalAlignment = -4108
+    sheet.Range("G11").Font.Bold = True
+
+    # Explanation row.
+    sheet.Range("A12:G12").Interior.Color = 0xE8F5FF
+    sheet.Range("A12:G12").Font.Color = 0x203040
+    sheet.Range("A12:G12").HorizontalAlignment = -4108
+    sheet.Range("A12:G12").VerticalAlignment = -4108
+
+    # Column widths deliberately compact so A:G fit in the captured area.
+    widths = {
+        1: 15, 2: 14, 3: 13, 4: 12, 5: 12, 6: 13, 7: 15
+    }
+    for col, width in widths.items():
+        sheet.Columns(col).ColumnWidth = width
+
+    # Compact first rows so the data and live formula row appear together.
+    sheet.Rows(1).RowHeight = 22
+    sheet.Rows(2).RowHeight = 20
+    sheet.Rows(3).RowHeight = 5
+    sheet.Rows(4).RowHeight = 21
+    for r in range(5, 11):
+        sheet.Rows(r).RowHeight = 21
+    sheet.Rows(11).RowHeight = 22
+    sheet.Rows(12).RowHeight = 24
 
     # Freeze top rows.
     try:
@@ -723,7 +798,7 @@ def demonstrate_formula(excel, sheet, topic):
 
     # Click the formula result area.
     try:
-        sheet.Range("G13").Select()
+        sheet.Range("G11").Select()
         time.sleep(0.6)
     except Exception:
         pass
@@ -1023,85 +1098,271 @@ def _wrap_text(draw, text, font, max_width):
     return lines
 
 
-def create_overlay_png(topic, path: Path):
-    """Create the lower information cards as a transparent PNG.
 
-    Using PIL here avoids FFmpeg drawtext parsing problems with apostrophes,
-    commas, formulas and other punctuation in the card text.
+def _hex(hex_value):
+    hex_value = hex_value.lstrip("#")
+    return tuple(int(hex_value[i:i + 2], 16) for i in (0, 2, 4)) + (255,)
+
+
+def _fit_font(draw, text, font_path_candidates, max_size, min_size, max_width, bold=False):
+    for size in range(max_size, min_size - 1, -2):
+        font = _font(size, bold)
+        box = draw.textbbox((0, 0), str(text), font=font)
+        if box[2] - box[0] <= max_width:
+            return font
+    return _font(min_size, bold)
+
+
+def _draw_icon_circle(draw, center, radius, fill, text_value, font):
+    x, y = center
+    draw.ellipse(
+        (x - radius, y - radius, x + radius, y + radius),
+        fill=fill,
+    )
+    box = draw.textbbox((0, 0), text_value, font=font)
+    tw = box[2] - box[0]
+    th = box[3] - box[1]
+    draw.text(
+        (x - tw / 2, y - th / 2 - 2),
+        text_value,
+        font=font,
+        fill=(255, 255, 255, 255),
+    )
+
+
+def _draw_youtube_icon(draw, x, y, w=72, h=48):
+    red = _hex("#FF1F2D")
+    draw.rounded_rectangle((x, y, x + w, y + h), radius=12, fill=red)
+    draw.polygon(
+        [(x + 29, y + 12), (x + 29, y + 36), (x + 49, y + 24)],
+        fill=(255, 255, 255, 255),
+    )
+
+
+def _result_for_topic(topic):
+    tid = topic["id"]
+    rows = topic.get("rows", [])
+    values_f = [r[5] for r in rows if len(r) > 5 and isinstance(r[5], (int, float))]
+    if tid == "if":
+        return "Completed", "Status is Done → Completed"
+    if tid == "sum":
+        return f"{sum(values_f):,.0f}", "Total of the selected sales values"
+    if tid == "average":
+        return f"{sum(values_f) / len(values_f):,.2f}", "Average of the selected values"
+    if tid == "max":
+        return f"{max(values_f):,.0f}", "Highest value in the selected range"
+    if tid == "min":
+        return f"{min(values_f):,.0f}", "Lowest value in the selected range"
+    if tid == "countif":
+        return str(sum(1 for r in rows if len(r) > 2 and r[2] == "Done")), "Rows where Status = Done"
+    if tid == "sumif":
+        return f"{sum(r[5] for r in rows if len(r) > 5 and r[2] == 'Done'):,.0f}", "Sales from rows where Status = Done"
+    if tid == "round":
+        return f"{float(rows[0][5]):,.2f}", "Rounded to 2 decimal places"
+    if tid == "left":
+        return str(rows[0][5])[:3], "First 3 characters from the code"
+    if tid == "product":
+        return f"{rows[0][5] * rows[1][5]:,.0f}", "Quantity × Price"
+    if tid == "textjoin":
+        return f"{rows[0][0]} - {rows[0][1]} - {rows[0][2]}", "Combined text with a separator"
+    if tid == "xlookup":
+        return str(rows[0][5]), "Matching value returned from the lookup"
+    return "Done", "Formula result shown in Excel"
+
+
+def _pro_tips(topic):
+    tips = {
+        "if": ["Use IF for status checks.", "Combine IF with AND/OR.", "Keep result text short."],
+        "sum": ["Works across rows or columns.", "Use SUM for totals.", "Avoid manual addition."],
+        "average": ["Works with numbers and scores.", "Use a clean range.", "Combine with IF for analysis."],
+        "max": ["Useful for highest sales.", "Works with dates too.", "Great for quick comparisons."],
+        "min": ["Useful for lowest values.", "Works with dates too.", "Great for exception checks."],
+        "countif": ["Perfect for status counts.", "Use wildcards for text.", "Great for dashboards."],
+        "sumif": ["Add only matching values.", "Use a clear criteria range.", "Great for sales reports."],
+        "round": ["Control decimal places.", "Useful for prices.", "Avoid long decimal displays."],
+        "left": ["Useful for codes.", "Change 3 to any count.", "Great for text cleanup."],
+        "product": ["Multiply values quickly.", "Useful for quantity × price.", "Works with cell references."],
+        "textjoin": ["Add any delimiter.", "TRUE ignores empty cells.", "Great for labels and IDs."],
+        "xlookup": ["Use exact matches.", "Can return text or numbers.", "Great for lookup tables."],
+    }
+    return tips.get(topic["id"], ["Use a clean data range.", "Check your references.", "Practice with real data."])
+
+
+def create_overlay_png(topic, path: Path):
+    """Create a polished Learn Verse educational overlay matching the supplied
+    Excel Quick Tip reference: branded header, topic banner, three information
+    cards, step-by-step panel, pro tips and YouTube footer.
     """
     W, H = 1080, 1920
     image = Image.new("RGBA", (W, H), (255, 255, 255, 0))
     draw = ImageDraw.Draw(image)
 
-    title_font = _font(40, True)
-    section_font = _font(30, True)
-    formula_font = _font(32, True)
-    body_font = _font(22, False)
-    small_font = _font(20, False)
-    brand_font = _font(38, True)
+    navy = _hex("#073B78")
+    blue = _hex("#0878D1")
+    light_blue = _hex("#E8F5FF")
+    green = _hex("#079447")
+    light_green = _hex("#E9F9EF")
+    yellow = _hex("#FFC928")
+    light_yellow = _hex("#FFF8DD")
+    purple = _hex("#7456D8")
+    pink = _hex("#E94E77")
+    red = _hex("#FF1F2D")
+    dark = _hex("#102A43")
+    gray = _hex("#52677D")
+    white = (255, 255, 255, 255)
 
-    margin = 35
-    width = W - margin * 2
-    radius = 28
-    outline = (225, 225, 225, 255)
-    yellow = (255, 205, 0, 255)
-    black = (20, 20, 20, 255)
-    gray = (75, 75, 75, 255)
-    white = (255, 255, 255, 248)
+    # ---------- Header ----------
+    draw.rectangle((0, 0, W, 150), fill=(246, 251, 255, 255))
 
-    def card(y, h):
-        draw.rounded_rectangle(
-            (margin, y, margin + width, y + h),
-            radius=radius,
-            fill=white,
-            outline=outline,
-            width=2,
-        )
-        draw.rounded_rectangle(
-            (margin, y, margin + 12, y + h),
-            radius=6,
-            fill=yellow,
-        )
+    # Excel-style logo.
+    draw.rounded_rectangle((28, 30, 132, 130), radius=18, fill=_hex("#107C41"))
+    draw.rounded_rectangle((48, 48, 112, 112), radius=10, fill=_hex("#21A366"))
+    xfont = _font(54, True)
+    draw.text((59, 49), "X", font=xfont, fill=white)
 
-    # Card 1: Today’s Steps
-    y1, h1 = 1115, 205
-    card(y1, h1)
-    draw.text((65, y1 + 20), "Today's Steps", font=section_font, fill=black)
-    steps_y = y1 + 65
-    for n, step in enumerate(topic["steps"], 1):
-        line = f"{n}. {step}"
-        lines = _wrap_text(draw, line, small_font, 930)
-        for line2 in lines:
-            draw.text((65, steps_y), line2, font=small_font, fill=gray)
-            steps_y += 25
-        steps_y += 1
-        if steps_y > y1 + h1 - 22:
-            break
+    header_font = _fit_font(draw, "Excel Quick Tip", [], 58, 40, 610, True)
+    draw.text((165, 23), "Excel Quick Tip", font=header_font, fill=navy)
 
-    # Card 2: Formula Used
-    y2, h2 = 1340, 245
-    card(y2, h2)
-    draw.text((65, y2 + 20), "Formula Used", font=section_font, fill=black)
-    draw.text((65, y2 + 60), str(topic["name"]), font=formula_font, fill=black)
-    formula_lines = _wrap_text(draw, topic["formula"], body_font, 930)
-    yy = y2 + 102
-    for line in formula_lines[:2]:
-        draw.text((65, yy), line, font=body_font, fill=black)
-        yy += 28
-    explanation_lines = _wrap_text(draw, topic["explanation"], small_font, 930)
-    yy += 4
-    for line in explanation_lines[:2]:
-        draw.text((65, yy), line, font=small_font, fill=gray)
-        yy += 25
+    sub_font = _font(31, False)
+    draw.text((168, 86), "Simple Formulas  •  Big Results", font=sub_font, fill=navy)
+    draw.line((168, 124, 545, 124), fill=yellow, width=5)
 
-    # Card 3: YouTube branding
-    y3, h3 = 1610, 220
-    card(y3, h3)
-    draw.text((65, y3 + 22), "Watch on YouTube", font=section_font, fill=black)
-    draw.text((65, y3 + 65), "LearnVerse9556", font=brand_font, fill=black)
-    draw.text((65, y3 + 122), "Follow Learn Verse for more Excel tips", font=body_font, fill=gray)
+    # Lightbulb icon.
+    draw.ellipse((605, 36, 661, 92), outline=yellow, width=6)
+    draw.rectangle((620, 88, 646, 103), fill=yellow)
+    draw.line((615, 110, 651, 110), fill=navy, width=4)
+
+    # Learn Verse branding.
+    brand_big = _font(32, True)
+    brand_small = _font(18, False)
+    draw.text((720, 28), "LEARN VERSE", font=brand_big, fill=navy)
+    draw.text((724, 72), "Learn • Practice • Grow", font=brand_small, fill=gray)
+
+    # ---------- Topic banner ----------
+    draw.rounded_rectangle((18, 162, W - 18, 300), radius=28, fill=green)
+    num_font = _font(30, True)
+    draw.rounded_rectangle((34, 184, 118, 270), radius=18, fill=_hex("#056B35"))
+    draw.text((58, 207), "#1", font=num_font, fill=white)
+
+    topic_title = f"{topic['name']} Formula in Excel"
+    title_font = _fit_font(draw, topic_title, [], 48, 30, 675, True)
+    draw.text((138, 180), topic_title, font=title_font, fill=yellow)
+
+    problem_font = _fit_font(draw, topic["problem"], [], 27, 19, 690, False)
+    draw.text((140, 235), topic["problem"], font=problem_font, fill=white)
+
+    save_font = _font(20, False)
+    draw.text((812, 188), "Save Time", font=save_font, fill=white)
+    draw.text((812, 216), "Work Smarter", font=save_font, fill=white)
+    draw.text((812, 244), "Be Productive", font=save_font, fill=white)
+
+    # ---------- Excel reveal frame ----------
+    draw.rounded_rectangle((18, 315, W - 18, 1040), radius=20, fill=(255, 255, 255, 0), outline=_hex("#D5DEE8"), width=3)
+    # This border/frame is underneath the actual Excel capture.
+
+    # ---------- Three detail cards ----------
+    card_y1, card_y2 = 1060, 1250
+    gap = 14
+    left = 18
+    card_w = (W - 36 - gap * 2) // 3
+    xs = [left, left + card_w + gap, left + (card_w + gap) * 2]
+
+    # Formula card
+    draw.rounded_rectangle((xs[0], card_y1, xs[0] + card_w, card_y2), radius=22, fill=blue)
+    icon_font = _font(25, True)
+    _draw_icon_circle(draw, (xs[0] + 48, card_y1 + 48), 30, _hex("#0B5CA8"), "ƒ", icon_font)
+    draw.text((xs[0] + 88, card_y1 + 25), "Formula Used", font=_font(25, True), fill=white)
+    formula_font = _fit_font(draw, topic["formula"], [], 25, 15, card_w - 30, True)
+    draw.rounded_rectangle((xs[0] + 18, card_y1 + 78, xs[0] + card_w - 18, card_y1 + 132),
+                           radius=12, fill=white)
+    draw.text((xs[0] + 30, card_y1 + 91), topic["formula"], font=formula_font, fill=navy)
+
+    # What it does card
+    draw.rounded_rectangle((xs[1], card_y1, xs[1] + card_w, card_y2), radius=22, fill=light_green)
+    _draw_icon_circle(draw, (xs[1] + 48, card_y1 + 48), 30, green, "i", icon_font)
+    draw.text((xs[1] + 88, card_y1 + 25), "What It Does", font=_font(25, True), fill=dark)
+    desc = _wrap_text(draw, topic["explanation"], _font(19, False), card_w - 36)
+    yy = card_y1 + 84
+    for line in desc[:4]:
+        draw.text((xs[1] + 18, yy), line, font=_font(19, False), fill=gray)
+        yy += 27
+
+    # Result card
+    result, result_desc = _result_for_topic(topic)
+    draw.rounded_rectangle((xs[2], card_y1, xs[2] + card_w, card_y2), radius=22, fill=_hex("#F0ECFF"))
+    _draw_icon_circle(draw, (xs[2] + 48, card_y1 + 48), 30, purple, "✓", icon_font)
+    draw.text((xs[2] + 88, card_y1 + 25), "Result", font=_font(25, True), fill=dark)
+    result_font = _fit_font(draw, result, [], 34, 22, card_w - 36, True)
+    draw.rounded_rectangle((xs[2] + 18, card_y1 + 75, xs[2] + card_w - 18, card_y1 + 128),
+                           radius=14, fill=_hex("#DDF8E7"), outline=_hex("#56C982"), width=2)
+    rbox = draw.textbbox((0, 0), result, font=result_font)
+    rw = rbox[2] - rbox[0]
+    draw.text((xs[2] + (card_w - rw) / 2, card_y1 + 87), result, font=result_font, fill=green)
+    rd = _wrap_text(draw, result_desc, _font(16, False), card_w - 36)
+    yy = card_y1 + 142
+    for line in rd[:2]:
+        draw.text((xs[2] + 18, yy), line, font=_font(16, False), fill=gray)
+        yy += 22
+
+    # ---------- Step by Step ----------
+    sy1, sy2 = 1270, 1570
+    draw.rounded_rectangle((18, sy1, W - 18, sy2), radius=24, fill=light_yellow, outline=yellow, width=3)
+    _draw_icon_circle(draw, (68, sy1 + 52), 30, navy, "✓", icon_font)
+    draw.text((116, sy1 + 24), "Step by Step", font=_font(34, True), fill=navy)
+    draw.line((116, sy1 + 69, 350, sy1 + 69), fill=blue, width=4)
+
+    steps = topic["steps"][:4]
+    step_y = sy1 + 92
+    step_colors = [red, blue, purple, green]
+    for idx, step in enumerate(steps, 1):
+        _draw_icon_circle(draw, (65, step_y + 17), 19, step_colors[idx - 1], str(idx), _font(18, True))
+        step_font = _fit_font(draw, step, [], 23, 17, 860, False)
+        draw.text((102, step_y + 3), step, font=step_font, fill=dark)
+        step_y += 50
+
+    # Highlight formula action if there is room.
+    formula_label = "Formula: " + topic["formula"]
+    ff = _fit_font(draw, formula_label, [], 20, 14, 820, True)
+    draw.rounded_rectangle((102, sy2 - 52, 900, sy2 - 18), radius=10, fill=_hex("#D8F4E2"))
+    draw.text((116, sy2 - 47), formula_label, font=ff, fill=green)
+
+    # ---------- Pro Tips ----------
+    py1, py2 = 1590, 1720
+    draw.rounded_rectangle((18, py1, W - 18, py2), radius=22, fill=light_blue, outline=_hex("#7CC7FF"), width=3)
+    _draw_icon_circle(draw, (68, py1 + 43), 28, navy, "★", _font(18, True))
+    draw.text((110, py1 + 20), "Pro Tips", font=_font(30, True), fill=navy)
+
+    tips = _pro_tips(topic)
+    col_w = 290
+    for i, tip in enumerate(tips):
+        x = 120 + i * 315
+        draw.ellipse((x, py1 + 62, x + 22, py1 + 84), fill=blue)
+        draw.text((x + 5, py1 + 61), "✓", font=_font(14, True), fill=white)
+        lines = _wrap_text(draw, tip, _font(17, False), col_w)
+        yy = py1 + 58
+        for line in lines[:3]:
+            draw.text((x + 32, yy), line, font=_font(17, False), fill=dark)
+            yy += 22
+
+    # ---------- YouTube footer ----------
+    fy1, fy2 = 1740, 1920
+    draw.rounded_rectangle((0, fy1, W, fy2), radius=0, fill=navy)
+    _draw_youtube_icon(draw, 45, fy1 + 28, 70, 48)
+    draw.text((135, fy1 + 24), "Watch on YouTube", font=_font(34, True), fill=white)
+    draw.text((135, fy1 + 73), "Learn more Excel tips, formulas and shortcuts", font=_font(18, False), fill=white)
+    draw.text((135, fy1 + 101), "on our YouTube channel.", font=_font(18, False), fill=white)
+
+    # Channel pill
+    draw.rounded_rectangle((675, fy1 + 28, 1035, fy1 + 82), radius=27, fill=red)
+    _draw_youtube_icon(draw, 690, fy1 + 35, 44, 34)
+    draw.text((748, fy1 + 39), "LearnVerse9556", font=_font(24, True), fill=white)
+    draw.text((748, fy1 + 91), "♧  Subscribe for more!", font=_font(18, False), fill=white)
+
+    draw.line((135, fy1 + 132, 500, fy1 + 132), fill=blue, width=3)
+    draw.text((310, fy1 + 142), "— Learn Verse • Excel Made Easy —", font=_font(19, False), fill=white)
 
     image.save(path, "PNG")
+
 
 
 def render_final_video(
@@ -1133,12 +1394,16 @@ def render_final_video(
     # Landscape Excel capture -> vertical 1080x1920 canvas.
     # The lower cards are supplied as a transparent PNG, which avoids
     # FFmpeg drawtext quoting/filter-parser problems.
+    # The reference design uses a branded header, a topic banner, a large
+    # real-Excel area, then educational cards below it. The Excel capture is
+    # placed between y=315 and y=1040; the transparent overlay supplies the
+    # header/cards/footer.
     video_filter = (
         "[0:v]"
-        "crop=900:ih:0:0,"
-        "scale=1080:1092:flags=lanczos,"
+        "crop=900:640:0:0,"
+        "scale=1080:770:flags=lanczos,"
         "setsar=1,"
-        "pad=1080:1920:0:0:color=white,"
+        "pad=1080:1920:0:295:color=white,"
         "format=yuv420p"
         "[base];"
         "[base][2:v]overlay=0:0:format=auto,"
