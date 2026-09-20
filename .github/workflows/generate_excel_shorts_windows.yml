@@ -1,66 +1,97 @@
 name: Learn Verse Excel Shorts
+
 on:
   workflow_dispatch:
     inputs:
       run_date:
-        description: "Date YYYY-MM-DD"
+        description: "Date YYYY-MM-DD (leave blank for today)"
         required: false
         default: ""
       count:
         description: "Number of Shorts"
         required: true
-        default: "1"
+        default: "3"
         type: choice
-        options: ["1","2","3"]
+        options:
+          - "1"
+          - "2"
+          - "3"
+
   schedule:
+    # 04:00 UTC = 08:00 UAE
     - cron: "0 4 * * *"
+
 permissions:
   contents: read
+
 jobs:
   generate:
+    name: Generate Excel Shorts
     runs-on: [self-hosted, windows, excel]
-    timeout-minutes: 90
+    timeout-minutes: 120
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: System check
-        shell: powershell
+        shell: cmd
         run: |
+          echo ==========================================
+          echo LEARN VERSE EXCEL SHORTS
+          echo ==========================================
           python --version
-          ffmpeg -version | Select-Object -First 1
-          $e=New-Object -ComObject Excel.Application
-          Write-Host "Excel $($e.Version) detected"
-          $e.Quit()
-      - name: Install dependencies
-        shell: powershell
-        run: python -m pip install -r requirements.txt
-      - name: Generate
-        shell: powershell
+          echo.
+          ffmpeg -version
+          echo.
+          python -c "import win32com.client as w; e=w.DispatchEx('Excel.Application'); print('Excel version:', e.Version); e.Quit()"
+          echo ==========================================
+
+      - name: Install Python requirements
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Generate Shorts
+        shell: cmd
         env:
           RUN_DATE: ${{ inputs.run_date }}
           VIDEO_COUNT: ${{ inputs.count }}
         run: |
-          if (-not $env:VIDEO_COUNT) { $env:VIDEO_COUNT="3" }
-          $args=@("--count",$env:VIDEO_COUNT)
-          if ($env:RUN_DATE) { $args += @("--date",$env:RUN_DATE) }
-          python excel_runner.py @args
-      - name: Validate
-        shell: powershell
+          if "%VIDEO_COUNT%"=="" set VIDEO_COUNT=3
+          if "%RUN_DATE%"=="" (
+            python excel_runner.py --count %VIDEO_COUNT%
+          ) else (
+            python excel_runner.py --date "%RUN_DATE%" --count %VIDEO_COUNT%
+          )
+
+      - name: Validate generated files
+        shell: cmd
+        env:
+          VIDEO_COUNT: ${{ inputs.count }}
         run: |
-          $v=@(Get-ChildItem output\*.mp4)
-          $x=@(Get-ChildItem output\*.xlsx)
-          if ($v.Count -lt 1) { throw "No MP4 generated" }
-          if ($x.Count -lt 1) { throw "No XLSX generated" }
-          $v | Select Name,Length | Format-Table -AutoSize
-      - name: Upload artifact
+          if "%VIDEO_COUNT%"=="" set VIDEO_COUNT=3
+          python -c "import json, pathlib, sys; p=pathlib.Path('output/manifest.json'); d=json.loads(p.read_text(encoding='utf-8')); n=len(d.get('videos',[])); expected=int('%VIDEO_COUNT%'); print('Manifest videos:',n); print('Expected:',expected); sys.exit(0 if n==expected else 1)"
+          if errorlevel 1 exit /b 1
+          dir output\*.mp4
+          dir output\*.xlsx
+          dir output\*.json
+
+      - name: Upload generated files as artifact
         uses: actions/upload-artifact@v4
         with:
           name: learnverse-excel-shorts-${{ github.run_number }}
-          path: output/*
+          path: |
+            output/*.mp4
+            output/*.xlsx
+            output/*.json
           retention-days: 3
           if-no-files-found: error
-      - name: Cleanup
+
+      - name: Cleanup temporary Python cache
         if: always()
-        shell: powershell
+        shell: cmd
         run: |
-          Remove-Item work -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item __pycache__ -Recurse -Force -ErrorAction SilentlyContinue
+          for /d /r . %%d in (__pycache__) do @if exist "%%d" rd /s /q "%%d"
+          if exist .pytest_cache rd /s /q .pytest_cache

@@ -1,8 +1,6 @@
+output/*
+!output/.gitkeep
 __pycache__/
 *.pyc
-output/*.mp4
-output/*.xlsx
-output/*.mp3
-output/*_raw.mp4
-work/
 *.log
+.env

@@ -1,257 +1,61 @@
-import os
+from __future__ import annotations
+
 import subprocess
-import psutil
-import win32gui
-import win32process
-import ctypes
+from pathlib import Path
+
+from excel_actions import focus_excel
 
 
-def get_desktop_size():
+def record_excel(excel, out, duration=30):
+    """Start a robust full-desktop GDI recording and return the Popen process.
+
+    We deliberately do NOT crop to the Excel window here. Window-coordinate cropping
+    was the source of the GitHub Actions FFmpeg failure. Excel is maximized, so the
+    final caption stage performs the controlled A:G crop instead.
     """
-    Get the actual Windows desktop dimensions.
-    """
-    user32 = ctypes.windll.user32
+    out = Path(out).resolve()
+    focus_excel(excel)
 
-    width = user32.GetSystemMetrics(0)
-    height = user32.GetSystemMetrics(1)
+    log_file = out.with_name(out.stem + "_ffmpeg.log")
+    log_handle = open(log_file, "w", encoding="utf-8")
 
-    return width, height
-
-
-def find_excel_window():
-    windows = []
-
-    def callback(hwnd, _):
-        if not win32gui.IsWindowVisible(hwnd):
-            return True
-
-        try:
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-
-            if pid <= 0:
-                return True
-
-            process = psutil.Process(pid)
-
-            if process.name().lower() == "excel.exe":
-                title = win32gui.GetWindowText(hwnd)
-
-                if title:
-                    windows.append((hwnd, pid, title))
-
-        except Exception:
-            pass
-
-        return True
-
-    win32gui.EnumWindows(callback, None)
-
-    if not windows:
-        raise RuntimeError(
-            "Microsoft Excel window was not found. "
-            "Please open Excel first."
-        )
-
-    # Prefer the largest visible Excel window.
-    best = None
-    best_area = 0
-
-    for hwnd, pid, title in windows:
-        try:
-            left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-
-            width = max(0, right - left)
-            height = max(0, bottom - top)
-            area = width * height
-
-            if area > best_area:
-                best_area = area
-                best = (hwnd, pid, title)
-
-        except Exception:
-            pass
-
-    if best is None:
-        best = windows[0]
-
-    hwnd, pid, title = best
-
-    print(f"Excel window found: {title}")
-    print(f"Excel HWND: {hwnd}")
-    print(f"Excel PID: {pid}")
-
-    return hwnd, pid
-
-
-def get_capture_area(hwnd):
-    """
-    Get Excel's visible screen rectangle and clamp it
-    safely inside the actual Windows desktop.
-    """
-
-    desktop_width, desktop_height = get_desktop_size()
-
-    print(
-        f"Actual Windows desktop: "
-        f"{desktop_width}x{desktop_height}"
-    )
-
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-
-    print(
-        f"Excel window rectangle before clamp: "
-        f"left={left}, top={top}, "
-        f"right={right}, bottom={bottom}"
-    )
-
-    # Clamp starting position.
-    left = max(0, left)
-    top = max(0, top)
-
-    # Clamp ending position.
-    right = min(desktop_width, right)
-    bottom = min(desktop_height, bottom)
-
-    width = right - left
-    height = bottom - top
-
-    if width <= 0 or height <= 0:
-        raise RuntimeError(
-            "Excel window is outside the visible desktop."
-        )
-
-    # H.264 works best with even dimensions.
-    width -= width % 2
-    height -= height % 2
-
-    if width < 320 or height < 240:
-        raise RuntimeError(
-            f"Excel capture area is too small: "
-            f"{width}x{height}"
-        )
-
-    print(
-        f"Excel capture area: "
-        f"x={left}, y={top}, "
-        f"width={width}, height={height}"
-    )
-
-    return left, top, width, height
-
-
-def start_ffmpeg_recording(output_file, duration=30):
-
-    hwnd, pid = find_excel_window()
-
-    left, top, width, height = get_capture_area(hwnd)
-
-    output_file = os.path.abspath(output_file)
-
-    output_dir = os.path.dirname(output_file)
-
-    if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
-
-    command = [
+    cmd = [
         "ffmpeg",
+        "-hide_banner",
+        "-loglevel", "warning",
         "-y",
-
-        "-f",
-        "gdigrab",
-
-        "-framerate",
-        "30",
-
-        "-draw_mouse",
-        "1",
-
-        "-offset_x",
-        str(left),
-
-        "-offset_y",
-        str(top),
-
-        "-video_size",
-        f"{width}x{height}",
-
-        "-t",
-        str(duration),
-
-        "-i",
-        "desktop",
-
-        "-c:v",
-        "libx264",
-
-        "-preset",
-        "veryfast",
-
-        "-pix_fmt",
-        "yuv420p",
-
-        output_file,
+        "-f", "gdigrab",
+        "-framerate", "30",
+        "-draw_mouse", "1",
+        "-i", "desktop",
+        "-t", str(duration),
+        "-an",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        str(out),
     ]
 
-    print()
-    print("Starting FFmpeg recording...")
-    print(f"Duration: {duration} seconds")
-    print(f"Resolution: {width}x{height}")
-    print(f"Output: {output_file}")
+    print("Desktop FFmpeg command:")
+    print(" ".join(cmd))
+    print(f"FFmpeg log: {log_file}")
 
-    # Do not use stdout/stderr PIPE.
-    # FFmpeg writes directly to the CMD window.
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.DEVNULL,
-        stdout=None,
-        stderr=None,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-    )
-
-    return process
-
-
-def record_excel(output_file, duration=30):
-    return start_ffmpeg_recording(
-        output_file=output_file,
-        duration=duration,
-    )
-
-
-if __name__ == "__main__":
-
-    import argparse
-
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--output",
-        required=True,
-        help="Output MP4 file",
-    )
-
-    parser.add_argument(
-        "--duration",
-        type=int,
-        default=30,
-        help="Recording duration",
-    )
-
-    args = parser.parse_args()
-
-    recorder = record_excel(
-        args.output,
-        args.duration,
-    )
-
-    return_code = recorder.wait()
-
-    if return_code != 0:
-        raise SystemExit(
-            f"FFmpeg failed with exit code {return_code}"
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
+                0,
+            ),
         )
+    except Exception:
+        log_handle.close()
+        raise
 
-    print()
-    print("============================================================")
-    print("RECORDING COMPLETED SUCCESSFULLY")
-    print("============================================================")
+    process._learnverse_log_handle = log_handle
+    return process
