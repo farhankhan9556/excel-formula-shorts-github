@@ -16,6 +16,7 @@ from pathlib import Path
 import pyautogui
 import win32com.client as win32
 import edge_tts
+from PIL import Image, ImageDraw, ImageFont
 
 
 # ============================================================
@@ -35,15 +36,23 @@ pyautogui.FAILSAFE = False
 # SETTINGS
 # ------------------------------------------------------------
 
+# Edge-TTS can occasionally return NoAudioReceived for a particular voice.
+# We therefore use adult female voices with automatic fallback and several
+# safe speaking-rate attempts. The first successful voice/rate is kept.
 VOICE_LIST = [
     "en-US-JennyNeural",
     "en-US-AriaNeural",
     "en-US-SaraNeural",
 ]
-
-VOICE_RATE = "+5%"
+VOICE_RATES = ["+8%", "+12%", "+16%", "+20%"]
 VOICE_VOLUME = "+0%"
 VOICE_PITCH = "+1Hz"
+
+# Keep the finished Short comfortably below 30 seconds without cutting the
+# narration. If narration is still too long after the fastest safe rate, the
+# generator fails that video rather than silently cutting spoken words.
+TARGET_VOICE_SECONDS = 29.40
+VOICE_RETRIES_PER_SETTING = 2
 
 FPS = 30
 MAX_VIDEO_SECONDS = 30
@@ -391,6 +400,7 @@ def run_command(cmd, timeout=None):
 
     result = subprocess.run(
         [str(x) for x in cmd],
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -666,7 +676,7 @@ def restore_excel_view(excel, sheet):
     except Exception:
         pass
 
-    time.sleep(0.5)
+    time.sleep(0.4)
 
     try:
         excel.ActiveWindow.ScrollColumn = 1
@@ -674,7 +684,15 @@ def restore_excel_view(excel, sheet):
     except Exception:
         pass
 
-    time.sleep(1)
+    # Keep the visible worksheet focused on columns A:G.
+    # Excel may show additional columns depending on window size,
+    # but this forces the sheet itself and selection to start at A1.
+    try:
+        sheet.Range("A1:G1").Select()
+    except Exception:
+        pass
+
+    time.sleep(0.5)
 
 
 # ------------------------------------------------------------
@@ -772,11 +790,11 @@ def create_script(topic, index):
     )
 
 
-async def generate_voice_async(text: str, output: Path, voice: str):
+async def generate_voice_async(text: str, output: Path, voice: str, rate: str):
     communicator = edge_tts.Communicate(
         text,
         voice=voice,
-        rate=VOICE_RATE,
+        rate=rate,
         volume=VOICE_VOLUME,
         pitch=VOICE_PITCH,
     )
@@ -785,22 +803,66 @@ async def generate_voice_async(text: str, output: Path, voice: str):
 
 
 def generate_voice(text: str, output: Path, index: int):
-    voice = VOICE_LIST[index % len(VOICE_LIST)]
+    # Rotate the preferred voice by video number, but automatically fall back
+    # to the other adult female voices when a provider request fails. This
+    # prevents one temporary Edge-TTS voice error from losing an entire day.
+    preferred = VOICE_LIST[index % len(VOICE_LIST)]
+    ordered_voices = [preferred] + [v for v in VOICE_LIST if v != preferred]
 
-    log(f"Generating voice: {voice}")
+    last_error = None
 
-    asyncio.run(
-        generate_voice_async(
-            text,
-            output,
-            voice,
-        )
+    for voice in ordered_voices:
+        for rate in VOICE_RATES:
+            for attempt in range(1, VOICE_RETRIES_PER_SETTING + 1):
+                safe_delete(output)
+                log(
+                    f"Generating voice: {voice} | rate {rate} | "
+                    f"attempt {attempt}/{VOICE_RETRIES_PER_SETTING}"
+                )
+
+                try:
+                    asyncio.run(
+                        generate_voice_async(
+                            text,
+                            output,
+                            voice,
+                            rate,
+                        )
+                    )
+
+                    if not output.exists() or output.stat().st_size < 1000:
+                        raise RuntimeError("Voice file was not generated correctly.")
+
+                    duration = ffprobe_duration(output)
+                    if duration <= 0:
+                        raise RuntimeError("Voice duration could not be determined.")
+
+                    if duration <= TARGET_VOICE_SECONDS:
+                        log(
+                            f"Voice ready: {voice} | {rate} | "
+                            f"{duration:.2f}s"
+                        )
+                        return voice
+
+                    log(
+                        f"Voice is {duration:.2f}s; trying a faster rate "
+                        f"without cutting narration."
+                    )
+
+                except Exception as exc:
+                    last_error = exc
+                    log(
+                        f"Voice attempt failed: {voice} / {rate}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    time.sleep(0.8)
+
+    safe_delete(output)
+    raise RuntimeError(
+        "All configured Edge-TTS voices/rates failed or exceeded the "
+        f"{TARGET_VOICE_SECONDS:.2f}s narration target. "
+        f"Last error: {last_error}"
     )
-
-    if not output.exists() or output.stat().st_size < 1000:
-        raise RuntimeError("Voice file was not generated correctly.")
-
-    return voice
 
 
 # ------------------------------------------------------------
@@ -923,6 +985,125 @@ def escape_filter_text(text: str) -> str:
     )
 
 
+def _font(size, bold=False):
+    candidates = []
+    if bold:
+        candidates += [
+            r"C:\\Windows\\Fonts\\arialbd.ttf",
+            r"C:\\Windows\\Fonts\\segoeuib.ttf",
+        ]
+    candidates += [
+        r"C:\\Windows\\Fonts\\arial.ttf",
+        r"C:\\Windows\\Fonts\\segoeui.ttf",
+    ]
+    for path in candidates:
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size=size)
+            except Exception:
+                pass
+    return ImageFont.load_default()
+
+
+def _wrap_text(draw, text, font, max_width):
+    words = str(text).split()
+    lines = []
+    current = ""
+    for word in words:
+        trial = word if not current else current + " " + word
+        box = draw.textbbox((0, 0), trial, font=font)
+        if box[2] - box[0] <= max_width:
+            current = trial
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def create_overlay_png(topic, path: Path):
+    """Create the lower information cards as a transparent PNG.
+
+    Using PIL here avoids FFmpeg drawtext parsing problems with apostrophes,
+    commas, formulas and other punctuation in the card text.
+    """
+    W, H = 1080, 1920
+    image = Image.new("RGBA", (W, H), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(image)
+
+    title_font = _font(40, True)
+    section_font = _font(30, True)
+    formula_font = _font(32, True)
+    body_font = _font(22, False)
+    small_font = _font(20, False)
+    brand_font = _font(38, True)
+
+    margin = 35
+    width = W - margin * 2
+    radius = 28
+    outline = (225, 225, 225, 255)
+    yellow = (255, 205, 0, 255)
+    black = (20, 20, 20, 255)
+    gray = (75, 75, 75, 255)
+    white = (255, 255, 255, 248)
+
+    def card(y, h):
+        draw.rounded_rectangle(
+            (margin, y, margin + width, y + h),
+            radius=radius,
+            fill=white,
+            outline=outline,
+            width=2,
+        )
+        draw.rounded_rectangle(
+            (margin, y, margin + 12, y + h),
+            radius=6,
+            fill=yellow,
+        )
+
+    # Card 1: Today’s Steps
+    y1, h1 = 1115, 205
+    card(y1, h1)
+    draw.text((65, y1 + 20), "Today's Steps", font=section_font, fill=black)
+    steps_y = y1 + 65
+    for n, step in enumerate(topic["steps"], 1):
+        line = f"{n}. {step}"
+        lines = _wrap_text(draw, line, small_font, 930)
+        for line2 in lines:
+            draw.text((65, steps_y), line2, font=small_font, fill=gray)
+            steps_y += 25
+        steps_y += 1
+        if steps_y > y1 + h1 - 22:
+            break
+
+    # Card 2: Formula Used
+    y2, h2 = 1340, 245
+    card(y2, h2)
+    draw.text((65, y2 + 20), "Formula Used", font=section_font, fill=black)
+    draw.text((65, y2 + 60), str(topic["name"]), font=formula_font, fill=black)
+    formula_lines = _wrap_text(draw, topic["formula"], body_font, 930)
+    yy = y2 + 102
+    for line in formula_lines[:2]:
+        draw.text((65, yy), line, font=body_font, fill=black)
+        yy += 28
+    explanation_lines = _wrap_text(draw, topic["explanation"], small_font, 930)
+    yy += 4
+    for line in explanation_lines[:2]:
+        draw.text((65, yy), line, font=small_font, fill=gray)
+        yy += 25
+
+    # Card 3: YouTube branding
+    y3, h3 = 1610, 220
+    card(y3, h3)
+    draw.text((65, y3 + 22), "Watch on YouTube", font=section_font, fill=black)
+    draw.text((65, y3 + 65), "LearnVerse9556", font=brand_font, fill=black)
+    draw.text((65, y3 + 122), "Follow Learn Verse for more Excel tips", font=body_font, fill=gray)
+
+    image.save(path, "PNG")
+
+
 def render_final_video(
     raw_video: Path,
     voice: Path,
@@ -933,7 +1114,6 @@ def render_final_video(
     require_program("ffprobe")
 
     voice_duration = ffprobe_duration(voice)
-
     if voice_duration <= 0:
         raise RuntimeError("Could not determine voice duration.")
 
@@ -947,167 +1127,85 @@ def render_final_video(
         f"Final duration: {final_duration:.2f}s"
     )
 
-    title = escape_filter_text(topic["title"])
-    formula_name = escape_filter_text(topic["name"])
-    formula = escape_filter_text(topic["formula"])
-    explanation = escape_filter_text(topic["explanation"])
+    overlay_path = final_video.with_name(final_video.stem + "_overlay.png")
+    create_overlay_png(topic, overlay_path)
 
-    steps_text = "\\n".join(
-        f"{i + 1}. {escape_filter_text(step)}"
-        for i, step in enumerate(topic["steps"])
-    )
-
-    # Excel is captured in landscape.
-    #
-    # We keep the left 900 pixels, resize it into the upper
-    # portion of a 1080x1920 vertical canvas, and use transparent
-    # information cards below it.
-    #
-    # drawtext is intentionally used instead of external image
-    # assets so the runner is self-contained.
-
-    filter_complex = (
+    # Landscape Excel capture -> vertical 1080x1920 canvas.
+    # The lower cards are supplied as a transparent PNG, which avoids
+    # FFmpeg drawtext quoting/filter-parser problems.
+    video_filter = (
         "[0:v]"
         "crop=900:ih:0:0,"
         "scale=1080:1092:flags=lanczos,"
         "setsar=1,"
-        "pad=1080:1920:0:0:white,"
+        "pad=1080:1920:0:0:color=white,"
         "format=yuv420p"
         "[base];"
+        "[base][2:v]overlay=0:0:format=auto,"
+        "format=yuv420p"
+        "[video]"
+    )
 
-        # Top title card.
-        "[base]"
-        f"drawbox=x=35:y=1120:w=1010:h=205:"
-        "color=white@0.94:t=fill,"
-        f"drawtext=text='{title}':"
-        "fontcolor=black:"
-        "fontsize=42:"
-        "x=65:y=1145:"
-        "borderw=1:"
-        "bordercolor=white,"
-        f"drawtext=text='Today's Steps':"
-        "fontcolor=black:"
-        "fontsize=30:"
-        "x=65:y=1205,"
-        f"drawtext=text='{steps_text}':"
-        "fontcolor=black:"
-        "fontsize=22:"
-        "line_spacing=10:"
-        "x=65:y=1245"
-        "[card1];"
-
-        # Formula card.
-        "[card1]"
-        "drawbox=x=35:y=1340:w=1010:h=245:"
-        "color=white@0.94:t=fill,"
-        f"drawtext=text='Formula Used':"
-        "fontcolor=black:"
-        "fontsize=30:"
-        "x=65:y=1365,"
-        f"drawtext=text='{formula_name}':"
-        "fontcolor=black:"
-        "fontsize=34:"
-        "x=65:y=1410,"
-        f"drawtext=text='{formula}':"
-        "fontcolor=black:"
-        "fontsize=24:"
-        "x=65:y=1455,"
-        f"drawtext=text='{explanation}':"
-        "fontcolor=black:"
-        "fontsize=20:"
-        "line_spacing=8:"
-        "x=65:y=1500"
-        "[card2];"
-
-        # YouTube branding card.
-        "[card2]"
-        "drawbox=x=35:y=1610:w=1010:h=220:"
-        "color=white@0.94:t=fill,"
-        "drawtext=text='Watch on YouTube':"
-        "fontcolor=black:"
-        "fontsize=32:"
-        "x=65:y=1640,"
-        "drawtext=text='LearnVerse9556':"
-        "fontcolor=black:"
-        "fontsize=38:"
-        "x=65:y=1690,"
-        "drawtext=text='Follow Learn Verse for more Excel tips':"
-        "fontcolor=black:"
-        "fontsize=24:"
-        "x=65:y=1750"
-        "[video];"
-
-        # Audio cleanup.
+    audio_filter = (
         "[1:a]"
         "highpass=f=80,"
-        "lowpass=f=15000,"
+        # Edge-TTS MP3 commonly uses a 24 kHz sample rate, so 10 kHz keeps
+        # the low-pass frequency safely below Nyquist and avoids filter errors.
+        "lowpass=f=10000,"
         "equalizer=f=1800:t=q:w=1:g=1.5,"
         "equalizer=f=3000:t=q:w=1:g=2,"
-        "acompressor="
-        "threshold=-19dB:"
-        "ratio=2.5:"
-        "attack=10:"
-        "release=140:"
-        "makeup=2,"
+        "acompressor=threshold=-19dB:ratio=2.5:attack=10:release=140:makeup=2,"
         "loudnorm=I=-15:TP=-1.5:LRA=6,"
         "aresample=48000"
         "[audio]"
     )
 
+    filter_complex = video_filter + ";" + audio_filter
+
     cmd = [
         "ffmpeg",
+        "-nostdin",
         "-hide_banner",
-        "-loglevel",
-        "warning",
+        "-loglevel", "warning",
         "-y",
-        "-i",
-        str(raw_video),
-        "-i",
-        str(voice),
-        "-filter_complex",
-        filter_complex,
-        "-map",
-        "[video]",
-        "-map",
-        "[audio]",
-        "-t",
-        f"{final_duration:.3f}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        "19",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "160k",
-        "-movflags",
-        "+faststart",
+        "-i", str(raw_video),
+        "-i", str(voice),
+        "-loop", "1",
+        "-framerate", str(FPS),
+        "-i", str(overlay_path),
+        "-filter_complex", filter_complex,
+        "-map", "[video]",
+        "-map", "[audio]",
+        "-t", f"{final_duration:.3f}",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-crf", "19",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "160k",
+        "-movflags", "+faststart",
         str(final_video),
     ]
 
-    run_command(cmd, timeout=180)
+    try:
+        run_command(cmd, timeout=180)
+    finally:
+        safe_delete(overlay_path)
 
     if not final_video.exists():
         raise RuntimeError("Final video was not created.")
 
     if final_video.stat().st_size < 50000:
         raise RuntimeError(
-            f"Final video is too small: "
-            f"{final_video.stat().st_size} bytes"
+            f"Final video is too small: {final_video.stat().st_size} bytes"
         )
 
     actual_duration = ffprobe_duration(final_video)
-
     log(
         f"Final video: {final_video.name} | "
         f"{final_video.stat().st_size:,} bytes | "
         f"{actual_duration:.2f}s"
     )
-
     return actual_duration
 
 
@@ -1319,6 +1417,7 @@ def clean_temporary_files():
     for pattern in [
         "*_raw.mp4",
         "*_ffmpeg.log",
+        "*_overlay.png",
         "*.tmp",
     ]:
         for file in OUTPUT.glob(pattern):
@@ -1330,35 +1429,16 @@ def clean_temporary_files():
 # ------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Learn Verse Excel Shorts Generator"
-    )
-
-    parser.add_argument(
-        "--count",
-        type=int,
-        default=3,
-        choices=range(1, 4),
-        help="Number of Shorts to generate",
-    )
-
-    parser.add_argument(
-        "--date",
-        type=str,
-        default=None,
-        help="Optional date in YYYY-MM-DD format",
-    )
-
+    parser = argparse.ArgumentParser(description="Learn Verse Excel Shorts Generator")
+    parser.add_argument("--count", type=int, default=3, choices=range(1, 4))
+    parser.add_argument("--date", type=str, default=None)
     args = parser.parse_args()
 
     require_program("ffmpeg")
     require_program("ffprobe")
 
     if args.date:
-        date_value = dt.datetime.strptime(
-            args.date,
-            "%Y-%m-%d",
-        ).date()
+        date_value = dt.datetime.strptime(args.date, "%Y-%m-%d").date()
     else:
         date_value = dt.date.today()
 
@@ -1370,71 +1450,34 @@ def main():
     log(f"Output: {OUTPUT}")
     log("=" * 70)
 
-    topics = get_daily_topics(
-        date_value,
-        args.count,
-    )
-
+    topics = get_daily_topics(date_value, args.count)
     results = []
 
-    try:
-        for index, topic in enumerate(topics, start=1):
-            try:
-                result = generate_one(
-                    topic,
-                    index,
-                    date_value,
-                )
+    for index, topic in enumerate(topics, start=1):
+        try:
+            results.append(generate_one(topic, index, date_value))
+        except Exception as exc:
+            log(f"VIDEO {index} FAILED: {type(exc).__name__}: {exc}")
+            continue
 
-                results.append(result)
-
-            except Exception as exc:
-                log(
-                    f"VIDEO {index} FAILED: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-
-                # Continue with the next video rather than
-                # destroying the whole day's generation.
-                continue
-
-    finally:
-        clean_temporary_files()
+    clean_temporary_files()
 
     log("=" * 70)
-    log("GENERATION SUMMARY")
+    log(f"Generated successfully: {len(results)}/{args.count}")
     log("=" * 70)
 
-    for result in results:
-        log(
-            f"VIDEO: {result['video'].name}"
-        )
+    if results:
+        for result in results:
+            log(f"VIDEO: {result['video'].name}")
+            log(f"WORKBOOK: {result['workbook'].name}")
+            log(f"METADATA: {result['metadata'].name}")
 
-        log(
-            f"WORKBOOK: {result['workbook'].name}"
-        )
-
-        log(
-            f"METADATA: {result['metadata'].name}"
-        )
-
-    log("=" * 70)
-    log(
-        f"Generated successfully: "
-        f"{len(results)}/{args.count}"
-    )
-    log("=" * 70)
-
-    if len(results) == 0:
-        raise RuntimeError(
-            "No Excel Shorts were generated successfully."
-        )
+    if not results:
+        log("No video was generated. Review the VIDEO FAILED message above.")
+        return 1
 
     if len(results) < args.count:
-        log(
-            "WARNING: Some requested videos failed. "
-            "Successful videos were preserved."
-        )
+        log("WARNING: Some requested videos failed; successful videos were preserved.")
 
     return 0
 
