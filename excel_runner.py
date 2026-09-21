@@ -808,10 +808,78 @@ def _force_window_foreground(hwnd):
 
 
 def _excel_hwnd(excel):
+    """
+    Return the real top-level Excel window handle.
+
+    Excel.Application.Hwnd is normally available, but under a self-hosted
+    GitHub Actions interactive session it can occasionally return/raise in a
+    way that does not expose the desktop window. In that case we locate the
+    actual XLMAIN window through Win32.
+    """
+    # Fast path: COM Hwnd.
     try:
-        return int(excel.Hwnd)
+        hwnd = int(excel.Hwnd)
+        if hwnd and win32gui.IsWindow(hwnd):
+            return hwnd
+    except Exception:
+        pass
+
+    # Build titles that identify the workbook/Excel instance.
+    candidates = []
+    for getter in (
+        lambda: excel.ActiveWindow.Caption,
+        lambda: excel.ActiveWorkbook.Name,
+        lambda: excel.Caption,
+    ):
+        try:
+            value = str(getter()).strip()
+            if value:
+                candidates.append(value.lower())
+        except Exception:
+            pass
+
+    windows = []
+
+    def enum_window(hwnd, _):
+        try:
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
+
+            # Excel's main desktop window class is XLMAIN.
+            if win32gui.GetClassName(hwnd).upper() != "XLMAIN":
+                return True
+
+            title = win32gui.GetWindowText(hwnd).strip()
+            windows.append((hwnd, title.lower()))
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(enum_window, None)
     except Exception:
         return 0
+
+    if not windows:
+        return 0
+
+    # Prefer a window whose title contains the active workbook name/caption.
+    for hwnd, title in windows:
+        if any(candidate and candidate in title for candidate in candidates):
+            return hwnd
+
+    # If there is only one Excel main window, it is unambiguous.
+    if len(windows) == 1:
+        return windows[0][0]
+
+    # Last resort: choose the visible Excel window that is currently active.
+    foreground = win32gui.GetForegroundWindow()
+    for hwnd, _ in windows:
+        if hwnd == foreground:
+            return hwnd
+
+    # Do not guess between multiple Excel instances.
+    return 0
 
 
 def focus_excel(excel):
@@ -820,7 +888,12 @@ def focus_excel(excel):
     except Exception:
         pass
 
-    hwnd = _excel_hwnd(excel)
+    hwnd = 0
+    for _ in range(20):
+        hwnd = _excel_hwnd(excel)
+        if hwnd:
+            break
+        time.sleep(0.25)
 
     if hwnd:
         for _ in range(3):
@@ -855,7 +928,18 @@ def keep_excel_on_top(excel):
 
     hwnd = _excel_hwnd(excel)
     if not hwnd:
-        return
+        # The COM Hwnd can be temporarily unavailable in the runner session.
+        # Try Win32 discovery for a few seconds before giving up.
+        for _ in range(20):
+            hwnd = _excel_hwnd(excel)
+            if hwnd:
+                break
+            time.sleep(0.25)
+
+    if not hwnd:
+        raise RuntimeError(
+            "Could not obtain Excel window handle while trying to focus Excel."
+        )
 
     _force_window_foreground(hwnd)
 
@@ -921,11 +1005,24 @@ def restore_excel_view(excel, sheet):
 
 def verify_excel_recording_window(excel):
     """Verify Excel is foreground and fills the primary monitor before capture."""
-    hwnd = _excel_hwnd(excel)
-    if not hwnd:
-        raise RuntimeError("Could not obtain Excel window handle.")
+    hwnd = 0
 
-    keep_excel_on_top(excel)
+    # Give the Excel GUI a few seconds to finish exposing XLMAIN.
+    for _ in range(20):
+        hwnd = _excel_hwnd(excel)
+        if hwnd:
+            break
+        time.sleep(0.25)
+
+    if not hwnd:
+        raise RuntimeError(
+            "Could not obtain Excel window handle. "
+            "No visible XLMAIN window was found after 5 seconds."
+        )
+
+    # Re-assert focus/topmost after discovering the real window.
+    _force_window_foreground(hwnd)
+    time.sleep(0.3)
 
     foreground = win32gui.GetForegroundWindow()
     if foreground != hwnd:
@@ -946,6 +1043,14 @@ def verify_excel_recording_window(excel):
 
     # Allow a small Windows border tolerance.
     if win_w < mon_w - 20 or win_h < mon_h - 20:
+        # One final explicit maximize attempt.
+        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+        time.sleep(0.4)
+        rect = win32gui.GetWindowRect(hwnd)
+        win_w = rect[2] - rect[0]
+        win_h = rect[3] - rect[1]
+
+    if win_w < mon_w - 20 or win_h < mon_h - 20:
         raise RuntimeError(
             f"Excel is not maximized. Window={win_w}x{win_h}, "
             f"monitor work area={mon_w}x{mon_h}"
@@ -953,9 +1058,10 @@ def verify_excel_recording_window(excel):
 
     log(
         f"Excel recording window verified: foreground=True, "
-        f"window={win_w}x{win_h}, monitor={mon_w}x{mon_h}"
+        f"window={win_w}x{win_h}, monitor={mon_w}x{mon_h}, hwnd={hwnd}"
     )
 
+    return hwnd
 
 
 def release_excel_topmost(excel):
