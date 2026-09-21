@@ -2267,10 +2267,10 @@ def main():
             "generated_count": len(manifest_items),
             "files": manifest_items,
         }
-        manifest_path = PERMANENT_OUTPUT / (
-            "learnverse_run_manifest_" +
-            datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ".json"
-        )
+        # Deterministic manifest name: the workflow always validates the
+        # manifest created by the latest completed generator invocation.
+        # This avoids accidentally selecting an older manifest.
+        manifest_path = PERMANENT_OUTPUT / "learnverse_current_run_manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         log(f"RUN MANIFEST: {manifest_path}")
     except Exception as exc:
