@@ -18,6 +18,8 @@ import win32com.client as win32
 import win32con
 import win32gui
 import win32process
+import win32api
+import ctypes
 import edge_tts
 from PIL import Image, ImageDraw, ImageFont
 
@@ -30,6 +32,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT = ROOT / "output"
+# When running inside GitHub Actions, this is the permanent PC folder used by
+# the YouTube uploader. If it exists, copy final files there too.
+PERMANENT_OUTPUT = Path(r"C:\excel-formula-shorts-github\output")
 OUTPUT.mkdir(parents=True, exist_ok=True)
 
 pyautogui.PAUSE = 0.15
@@ -717,56 +722,83 @@ def build_excel_workbook(topic, workbook_path: Path):
 
 
 def _force_window_foreground(hwnd):
-    """Force a Windows window to the foreground as reliably as possible."""
+    """Force Excel to the primary monitor, maximized and foreground/topmost."""
     if not hwnd:
         return False
 
     try:
-        # Restore/maximize first.
+        # Restore first so SetWindowPos can establish a deterministic size.
         win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
         time.sleep(0.15)
+
+        # Get the primary monitor work area.
+        monitor = win32api.GetMonitorInfo(
+            win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTOPRIMARY)
+        )
+        left, top, right, bottom = monitor["Work"]
+        width = right - left
+        height = bottom - top
+
+        # Temporarily make Excel topmost AND explicitly fill the work area.
+        win32gui.SetWindowPos(
+            hwnd,
+            win32con.HWND_TOPMOST,
+            left,
+            top,
+            width,
+            height,
+            win32con.SWP_SHOWWINDOW,
+        )
+
+        # Ask Windows to maximize as well.
         win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
 
+        # Foreground handling: Windows may otherwise reject SetForegroundWindow
+        # when the runner's process is not the foreground owner.
         foreground = win32gui.GetForegroundWindow()
-        current_tid = win32process.GetWindowThreadProcessId(foreground)[0] if foreground else 0
+        current_tid = (
+            win32process.GetWindowThreadProcessId(foreground)[0]
+            if foreground else 0
+        )
         target_tid = win32process.GetWindowThreadProcessId(hwnd)[0]
 
-        # Windows can block SetForegroundWindow when another process owns focus.
-        # Temporarily attach the input queues so Excel can become foreground.
+        attached = False
         if current_tid and current_tid != target_tid:
             try:
                 win32process.AttachThreadInput(current_tid, target_tid, True)
+                attached = True
             except Exception:
                 pass
 
         try:
             win32gui.BringWindowToTop(hwnd)
             win32gui.SetForegroundWindow(hwnd)
+            try:
+                ctypes.windll.user32.SetActiveWindow(hwnd)
+            except Exception:
+                pass
         finally:
-            if current_tid and current_tid != target_tid:
+            if attached:
                 try:
                     win32process.AttachThreadInput(current_tid, target_tid, False)
                 except Exception:
                     pass
 
-        # Keep Excel above other desktop windows during recording.
+        # Final deterministic bounds check after maximizing.
         try:
             win32gui.SetWindowPos(
                 hwnd,
                 win32con.HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                win32con.SWP_NOMOVE
-                | win32con.SWP_NOSIZE
-                | win32con.SWP_SHOWWINDOW,
+                left,
+                top,
+                width,
+                height,
+                win32con.SWP_SHOWWINDOW,
             )
         except Exception:
             pass
 
-        # Re-apply maximize after topmost.
-        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+        time.sleep(0.25)
         return win32gui.GetForegroundWindow() == hwnd
 
     except Exception as exc:
@@ -826,6 +858,20 @@ def keep_excel_on_top(excel):
 
     _force_window_foreground(hwnd)
 
+    # GUI fallback: Alt+Space -> X is the standard Windows maximize command.
+    # This is deliberately done only while Excel is already foreground.
+    try:
+        if win32gui.GetForegroundWindow() == hwnd:
+            pyautogui.hotkey("alt", "space")
+            time.sleep(0.2)
+            pyautogui.press("x")
+            time.sleep(0.5)
+    except Exception as exc:
+        log(f"Excel GUI maximize fallback warning: {exc}")
+
+    # Re-assert topmost after the GUI maximize command.
+    _force_window_foreground(hwnd)
+
 
 def restore_excel_view(excel, sheet):
     focus_excel(excel)
@@ -870,6 +916,45 @@ def restore_excel_view(excel, sheet):
 
     keep_excel_on_top(excel)
     time.sleep(0.5)
+
+
+def verify_excel_recording_window(excel):
+    """Verify Excel is foreground and fills the primary monitor before capture."""
+    hwnd = _excel_hwnd(excel)
+    if not hwnd:
+        raise RuntimeError("Could not obtain Excel window handle.")
+
+    keep_excel_on_top(excel)
+
+    foreground = win32gui.GetForegroundWindow()
+    if foreground != hwnd:
+        raise RuntimeError(
+            f"Excel is not foreground before recording. "
+            f"Excel HWND={hwnd}, foreground HWND={foreground}"
+        )
+
+    rect = win32gui.GetWindowRect(hwnd)
+    monitor = win32api.GetMonitorInfo(
+        win32api.MonitorFromWindow(hwnd, win32con.MONITOR_DEFAULTTOPRIMARY)
+    )
+    left, top, right, bottom = monitor["Work"]
+    win_w = rect[2] - rect[0]
+    win_h = rect[3] - rect[1]
+    mon_w = right - left
+    mon_h = bottom - top
+
+    # Allow a small Windows border tolerance.
+    if win_w < mon_w - 20 or win_h < mon_h - 20:
+        raise RuntimeError(
+            f"Excel is not maximized. Window={win_w}x{win_h}, "
+            f"monitor work area={mon_w}x{mon_h}"
+        )
+
+    log(
+        f"Excel recording window verified: foreground=True, "
+        f"window={win_w}x{win_h}, monitor={mon_w}x{mon_h}"
+    )
+
 
 
 def release_excel_topmost(excel):
@@ -1713,6 +1798,7 @@ def generate_one(topic, index, date_value):
         # foreground/maximized window before the demonstration begins.
         keep_excel_on_top(excel)
         time.sleep(0.8)
+        verify_excel_recording_window(excel)
 
         # 6. Perform the actual Excel interaction.
         demonstrate_formula(
@@ -1757,10 +1843,36 @@ def generate_one(topic, index, date_value):
                 f"Final video was not created correctly: {final_path}"
             )
 
+        # Explicitly persist generated files to the permanent PC output folder.
+        # This makes the generator independent of GitHub Actions' checkout path.
+        if str(PERMANENT_OUTPUT.resolve()).lower() != str(OUTPUT.resolve()).lower():
+            try:
+                PERMANENT_OUTPUT.mkdir(parents=True, exist_ok=True)
+                import shutil
+                for persist_file in (
+                    final_path,
+                    workbook_path,
+                    metadata_path,
+                ):
+                    if persist_file.exists():
+                        destination = PERMANENT_OUTPUT / persist_file.name
+                        shutil.copy2(persist_file, destination)
+                        if not destination.exists():
+                            raise RuntimeError(
+                                f"Permanent copy missing after copy: {destination}"
+                            )
+                        log(f"PERMANENT COPY: {destination}")
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Could not persist generated files to "
+                    f"{PERMANENT_OUTPUT}: {exc}"
+                )
+
         log(
             f"SUCCESS: {final_path.name} | "
             f"{final_path.stat().st_size:,} bytes | "
-            f"saved to {final_path.resolve()}"
+            f"workspace={final_path.resolve()} | "
+            f"permanent={PERMANENT_OUTPUT.resolve()}"
         )
 
         return {

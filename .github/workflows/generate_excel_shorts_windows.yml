@@ -18,7 +18,6 @@ on:
           - "3"
 
   schedule:
-    # 02:00 UTC = 06:00 UAE
     - cron: "0 2 * * *"
 
 permissions:
@@ -38,18 +37,12 @@ jobs:
         shell: cmd
         run: |
           echo ==========================================
-          echo LEARN VERSE EXCEL SHORTS
+          echo LEARN VERSE EXCEL SHORTS V5
           echo ==========================================
-          echo Python:
           python --version
-          echo.
-          echo FFmpeg:
           ffmpeg -version
-          echo.
-          echo Excel:
           python -c "import win32com.client as w; e=w.DispatchEx('Excel.Application'); print('Excel version:', e.Version); e.Quit()"
-          echo.
-          echo Persistent PC output:
+          echo Permanent output:
           echo C:\excel-formula-shorts-github\output
           echo ==========================================
 
@@ -68,82 +61,47 @@ jobs:
           if "%VIDEO_COUNT%"=="" set VIDEO_COUNT=3
 
           if "%RUN_DATE%"=="" (
-            echo Generating %VIDEO_COUNT% Shorts for today...
             python excel_runner.py --count %VIDEO_COUNT%
           ) else (
-            echo Generating %VIDEO_COUNT% Shorts for %RUN_DATE%...
             python excel_runner.py --date "%RUN_DATE%" --count %VIDEO_COUNT%
           )
 
-          if errorlevel 1 (
-            echo.
-            echo ==========================================
-            echo GENERATOR FAILED
-            echo ==========================================
-            exit /b 1
-          )
+          if errorlevel 1 exit /b 1
 
-      - name: Validate generated files
-        shell: cmd
+      - name: Validate permanent PC output
+        shell: powershell
         env:
           RUN_DATE: ${{ inputs.run_date }}
           VIDEO_COUNT: ${{ inputs.count }}
         run: |
-          if "%VIDEO_COUNT%"=="" set VIDEO_COUNT=3
+          $count = $env:VIDEO_COUNT
+          if ([string]::IsNullOrWhiteSpace($count)) { $count = "3" }
 
-          if "%RUN_DATE%"=="" (
-            for /f %%D in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd')"') do set CHECK_DATE=%%D
-          ) else (
-            set CHECK_DATE=%RUN_DATE%
-          )
-
-          echo Check date: %CHECK_DATE%
-          echo Expected videos: %VIDEO_COUNT%
-
-          python -c "import os,pathlib,sys; d=os.environ['CHECK_DATE']; expected=int(os.environ['VIDEO_COUNT']); p=pathlib.Path('output'); videos=sorted(p.glob(f'learnverse_{d}_*.mp4')); workbooks=sorted(p.glob(f'learnverse_{d}_*.xlsx')); metadata=sorted(p.glob(f'learnverse_{d}_*.json')); print('MP4 videos:',len(videos)); print('Excel workbooks:',len(workbooks)); print('Metadata files:',len(metadata)); [print('VIDEO:',x.name) for x in videos]; sys.exit(0 if len(videos)==expected and len(workbooks)==expected and len(metadata)==expected else 1)"
-
-          if errorlevel 1 (
-            echo.
-            echo ==========================================
-            echo VALIDATION FAILED
-            echo ==========================================
-            exit /b 1
-          )
-
-      - name: Copy generated files to permanent PC output
-        shell: powershell
-        run: |
-          $source = Join-Path $env:GITHUB_WORKSPACE "output"
-          $destination = "C:\excel-formula-shorts-github\output"
-
-          New-Item -ItemType Directory -Force -Path $destination | Out-Null
-
-          $files = Get-ChildItem $source -File |
-            Where-Object {
-              $_.Name -like "learnverse_*.mp4" -or
-              $_.Name -like "learnverse_*.xlsx" -or
-              $_.Name -like "learnverse_*.json"
-            }
-
-          if (-not $files) {
-            throw "No generated LearnVerse files were found in $source"
+          $date = $env:RUN_DATE
+          if ([string]::IsNullOrWhiteSpace($date)) {
+            $date = (Get-Date).ToString("yyyy-MM-dd")
           }
 
-          foreach ($file in $files) {
-            Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
-            Write-Host "COPIED:" $file.Name "->" $destination
-          }
+          $out = "C:\excel-formula-shorts-github\output"
+          Write-Host "Permanent output: $out"
+          Write-Host "Date: $date"
+          Write-Host "Expected videos: $count"
 
-          Write-Host ""
-          Write-Host "Permanent PC output now contains:"
-          Get-ChildItem $destination -File |
-            Where-Object {
-              $_.Name -like "learnverse_*.mp4" -or
-              $_.Name -like "learnverse_*.xlsx" -or
-              $_.Name -like "learnverse_*.json"
-            } |
-            Sort-Object LastWriteTime |
-            Format-Table Name, Length, LastWriteTime -AutoSize
+          $videos = @(Get-ChildItem $out -File -Filter "learnverse_${date}_*.mp4")
+          $xlsx   = @(Get-ChildItem $out -File -Filter "learnverse_${date}_*.xlsx")
+          $json   = @(Get-ChildItem $out -File -Filter "learnverse_${date}_*.json")
+
+          Write-Host "MP4: $($videos.Count)"
+          Write-Host "XLSX: $($xlsx.Count)"
+          Write-Host "JSON: $($json.Count)"
+
+          $videos | Format-Table Name,Length,LastWriteTime -AutoSize
+
+          if ($videos.Count -ne [int]$count -or
+              $xlsx.Count -ne [int]$count -or
+              $json.Count -ne [int]$count) {
+            throw "Permanent output validation failed."
+          }
 
       - name: Upload generated files as artifact
         uses: actions/upload-artifact@v4
@@ -156,7 +114,7 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
-      - name: Cleanup temporary Python cache
+      - name: Cleanup Python cache
         if: always()
         shell: cmd
         run: |
