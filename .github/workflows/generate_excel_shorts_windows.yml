@@ -71,37 +71,30 @@ jobs:
       - name: Validate permanent PC output
         shell: powershell
         env:
-          RUN_DATE: ${{ inputs.run_date }}
           VIDEO_COUNT: ${{ inputs.count }}
         run: |
           $count = $env:VIDEO_COUNT
           if ([string]::IsNullOrWhiteSpace($count)) { $count = "3" }
-
-          $date = $env:RUN_DATE
-          if ([string]::IsNullOrWhiteSpace($date)) {
-            $date = (Get-Date).ToString("yyyy-MM-dd")
-          }
-
           $out = "C:\excel-formula-shorts-github\output"
-          Write-Host "Permanent output: $out"
-          Write-Host "Date: $date"
-          Write-Host "Expected videos: $count"
-
-          $videos = @(Get-ChildItem $out -File -Filter "learnverse_${date}_*.mp4")
-          $xlsx   = @(Get-ChildItem $out -File -Filter "learnverse_${date}_*.xlsx")
-          $json   = @(Get-ChildItem $out -File -Filter "learnverse_${date}_*.json")
-
-          Write-Host "MP4: $($videos.Count)"
-          Write-Host "XLSX: $($xlsx.Count)"
-          Write-Host "JSON: $($json.Count)"
-
-          $videos | Format-Table Name,Length,LastWriteTime -AutoSize
-
-          if ($videos.Count -ne [int]$count -or
-              $xlsx.Count -ne [int]$count -or
-              $json.Count -ne [int]$count) {
-            throw "Permanent output validation failed."
+          $manifests = @(Get-ChildItem $out -File -Filter "learnverse_run_manifest_*.json" | Sort-Object LastWriteTime -Descending)
+          if ($manifests.Count -eq 0) { throw "No run manifest found in permanent output." }
+          $manifest = $manifests[0]
+          Write-Host "Using run manifest: $($manifest.FullName)"
+          $data = Get-Content $manifest.FullName -Raw | ConvertFrom-Json
+          if ([int]$data.expected_count -ne [int]$count) { throw "Manifest count mismatch." }
+          $items = @($data.files)
+          if ($items.Count -ne [int]$count) { throw "Current run generated $($items.Count) file sets; expected $count." }
+          foreach ($item in $items) {
+            foreach ($key in @("video","workbook","metadata")) {
+              $name = [string]$item.$key
+              if ([string]::IsNullOrWhiteSpace($name)) { throw "Manifest missing $key." }
+              $full = Join-Path $out $name
+              if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "Missing permanent output file: $full" }
+              if ((Get-Item -LiteralPath $full).Length -le 0) { throw "Empty permanent output file: $full" }
+              Write-Host "$key : $name"
+            }
           }
+          Write-Host "PERMANENT OUTPUT VALIDATION SUCCESSFUL"
 
       - name: Upload generated files as artifact
         uses: actions/upload-artifact@v4

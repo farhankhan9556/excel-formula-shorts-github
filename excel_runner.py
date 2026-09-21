@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import pyautogui
@@ -2241,6 +2242,39 @@ def main():
             continue
 
     clean_temporary_files()
+
+    # Authoritative manifest for THIS generator invocation. The permanent
+    # output folder is intentionally allowed to keep older videos, so the
+    # workflow must never validate by counting all date-matching files.
+    try:
+        PERMANENT_OUTPUT.mkdir(parents=True, exist_ok=True)
+        manifest_items = []
+        for result in results:
+            files = {}
+            for key in ("video", "workbook", "metadata"):
+                value = result.get(key)
+                if value:
+                    p = Path(value)
+                    permanent = PERMANENT_OUTPUT / p.name
+                    if permanent.exists():
+                        files[key] = permanent.name
+            if len(files) == 3:
+                manifest_items.append(files)
+
+        manifest = {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "expected_count": args.count,
+            "generated_count": len(manifest_items),
+            "files": manifest_items,
+        }
+        manifest_path = PERMANENT_OUTPUT / (
+            "learnverse_run_manifest_" +
+            datetime.now().strftime("%Y%m%d_%H%M%S_%f") + ".json"
+        )
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        log(f"RUN MANIFEST: {manifest_path}")
+    except Exception as exc:
+        log(f"RUN MANIFEST WARNING: {exc}")
 
     log("=" * 70)
     log(f"Generated successfully: {len(results)}/{args.count}")
