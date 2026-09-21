@@ -71,8 +71,9 @@ MAX_VIDEO_SECONDS = 30
 CAPTURE_WIDTH = 1366
 CAPTURE_HEIGHT = 768
 
-# Excel zoom.
-EXCEL_ZOOM = 80
+# Excel zoom. 90% gives a clearer sheet while the workbook layout is compact enough
+# to keep columns A:G visible in the recording.
+EXCEL_ZOOM = 90
 
 
 # ------------------------------------------------------------
@@ -1382,9 +1383,13 @@ def _pro_tips(topic):
 
 
 def create_overlay_png(topic, path: Path):
-    """Create a polished Learn Verse educational overlay matching the supplied
-    Excel Quick Tip reference: branded header, topic banner, three information
-    cards, step-by-step panel, pro tips and YouTube footer.
+    """Create the Learn Verse vertical overlay.
+
+    V6 layout change:
+    - The real Excel recording area is taller/larger.
+    - The three information cards directly below Excel are shorter.
+    - Text in the lower cards is compact so the actual Excel sheet gets more
+      visual priority.
     """
     W, H = 1080, 1920
     image = Image.new("RGBA", (W, H), (255, 255, 255, 0))
@@ -1398,7 +1403,6 @@ def create_overlay_png(topic, path: Path):
     yellow = _hex("#FFC928")
     light_yellow = _hex("#FFF8DD")
     purple = _hex("#7456D8")
-    pink = _hex("#E94E77")
     red = _hex("#FF1F2D")
     dark = _hex("#102A43")
     gray = _hex("#52677D")
@@ -1407,11 +1411,9 @@ def create_overlay_png(topic, path: Path):
     # ---------- Header ----------
     draw.rectangle((0, 0, W, 150), fill=(246, 251, 255, 255))
 
-    # Excel-style logo.
     draw.rounded_rectangle((28, 30, 132, 130), radius=18, fill=_hex("#107C41"))
     draw.rounded_rectangle((48, 48, 112, 112), radius=10, fill=_hex("#21A366"))
-    xfont = _font(54, True)
-    draw.text((59, 49), "X", font=xfont, fill=white)
+    draw.text((59, 49), "X", font=_font(54, True), fill=white)
 
     header_font = _fit_font(draw, "Excel Quick Tip", [], 58, 40, 610, True)
     draw.text((165, 23), "Excel Quick Tip", font=header_font, fill=navy)
@@ -1420,12 +1422,10 @@ def create_overlay_png(topic, path: Path):
     draw.text((168, 86), "Simple Formulas  •  Big Results", font=sub_font, fill=navy)
     draw.line((168, 124, 545, 124), fill=yellow, width=5)
 
-    # Lightbulb icon.
     draw.ellipse((605, 36, 661, 92), outline=yellow, width=6)
     draw.rectangle((620, 88, 646, 103), fill=yellow)
     draw.line((615, 110, 651, 110), fill=navy, width=4)
 
-    # Learn Verse branding.
     brand_big = _font(32, True)
     brand_small = _font(18, False)
     draw.text((720, 28), "LEARN VERSE", font=brand_big, fill=navy)
@@ -1433,9 +1433,8 @@ def create_overlay_png(topic, path: Path):
 
     # ---------- Topic banner ----------
     draw.rounded_rectangle((18, 162, W - 18, 300), radius=28, fill=green)
-    num_font = _font(30, True)
     draw.rounded_rectangle((34, 184, 118, 270), radius=18, fill=_hex("#056B35"))
-    draw.text((58, 207), "#1", font=num_font, fill=white)
+    draw.text((58, 207), "#1", font=_font(30, True), fill=white)
 
     topic_title = f"{topic['name']} Formula in Excel"
     title_font = _fit_font(draw, topic_title, [], 48, 30, 675, True)
@@ -1449,114 +1448,282 @@ def create_overlay_png(topic, path: Path):
     draw.text((812, 216), "Work Smarter", font=save_font, fill=white)
     draw.text((812, 244), "Be Productive", font=save_font, fill=white)
 
-    # ---------- Excel reveal frame ----------
-    draw.rounded_rectangle((18, 315, W - 18, 1040), radius=20, fill=(255, 255, 255, 0), outline=_hex("#D5DEE8"), width=3)
-    # This border/frame is underneath the actual Excel capture.
+    # ---------- LARGE REAL EXCEL REVEAL ----------
+    # Increased from 725 px to 815 px tall. This is the main visual focus.
+    EXCEL_TOP = 315
+    EXCEL_BOTTOM = 1130
+    draw.rounded_rectangle(
+        (18, EXCEL_TOP, W - 18, EXCEL_BOTTOM),
+        radius=20,
+        fill=(255, 255, 255, 0),
+        outline=_hex("#D5DEE8"),
+        width=3,
+    )
 
-    # ---------- Three detail cards ----------
-    card_y1, card_y2 = 1060, 1250
-    gap = 14
+    # ---------- COMPACT THREE DETAIL CARDS ----------
+    # Reduced from 190 px to 112 px.
+    card_y1, card_y2 = 1145, 1257
+    gap = 12
     left = 18
     card_w = (W - 36 - gap * 2) // 3
     xs = [left, left + card_w + gap, left + (card_w + gap) * 2]
 
     # Formula card
-    draw.rounded_rectangle((xs[0], card_y1, xs[0] + card_w, card_y2), radius=22, fill=blue)
-    icon_font = _font(25, True)
-    _draw_icon_circle(draw, (xs[0] + 48, card_y1 + 48), 30, _hex("#0B5CA8"), "ƒ", icon_font)
-    draw.text((xs[0] + 88, card_y1 + 25), "Formula Used", font=_font(25, True), fill=white)
-    formula_font = _fit_font(draw, topic["formula"], [], 25, 15, card_w - 30, True)
-    draw.rounded_rectangle((xs[0] + 18, card_y1 + 78, xs[0] + card_w - 18, card_y1 + 132),
-                           radius=12, fill=white)
-    draw.text((xs[0] + 30, card_y1 + 91), topic["formula"], font=formula_font, fill=navy)
+    draw.rounded_rectangle(
+        (xs[0], card_y1, xs[0] + card_w, card_y2),
+        radius=18,
+        fill=blue,
+    )
+    icon_font = _font(20, True)
+    _draw_icon_circle(
+        draw, (xs[0] + 40, card_y1 + 34), 23, _hex("#0B5CA8"), "ƒ", icon_font
+    )
+    draw.text(
+        (xs[0] + 72, card_y1 + 16),
+        "Formula Used",
+        font=_font(22, True),
+        fill=white,
+    )
+    formula_font = _fit_font(
+        draw, topic["formula"], [], 21, 13, card_w - 30, True
+    )
+    draw.rounded_rectangle(
+        (xs[0] + 12, card_y1 + 57, xs[0] + card_w - 12, card_y1 + 94),
+        radius=9,
+        fill=white,
+    )
+    draw.text(
+        (xs[0] + 20, card_y1 + 65),
+        topic["formula"],
+        font=formula_font,
+        fill=navy,
+    )
 
     # What it does card
-    draw.rounded_rectangle((xs[1], card_y1, xs[1] + card_w, card_y2), radius=22, fill=light_green)
-    _draw_icon_circle(draw, (xs[1] + 48, card_y1 + 48), 30, green, "i", icon_font)
-    draw.text((xs[1] + 88, card_y1 + 25), "What It Does", font=_font(25, True), fill=dark)
-    desc = _wrap_text(draw, topic["explanation"], _font(19, False), card_w - 36)
-    yy = card_y1 + 84
-    for line in desc[:4]:
-        draw.text((xs[1] + 18, yy), line, font=_font(19, False), fill=gray)
-        yy += 27
+    draw.rounded_rectangle(
+        (xs[1], card_y1, xs[1] + card_w, card_y2),
+        radius=18,
+        fill=light_green,
+    )
+    _draw_icon_circle(
+        draw, (xs[1] + 40, card_y1 + 34), 23, green, "i", icon_font
+    )
+    draw.text(
+        (xs[1] + 72, card_y1 + 16),
+        "What It Does",
+        font=_font(22, True),
+        fill=dark,
+    )
+    desc = _wrap_text(
+        draw, topic["explanation"], _font(16, False), card_w - 28
+    )
+    yy = card_y1 + 57
+    for line in desc[:2]:
+        draw.text(
+            (xs[1] + 14, yy),
+            line,
+            font=_font(16, False),
+            fill=gray,
+        )
+        yy += 21
 
     # Result card
     result, result_desc = _result_for_topic(topic)
-    draw.rounded_rectangle((xs[2], card_y1, xs[2] + card_w, card_y2), radius=22, fill=_hex("#F0ECFF"))
-    _draw_icon_circle(draw, (xs[2] + 48, card_y1 + 48), 30, purple, "✓", icon_font)
-    draw.text((xs[2] + 88, card_y1 + 25), "Result", font=_font(25, True), fill=dark)
-    result_font = _fit_font(draw, result, [], 34, 22, card_w - 36, True)
-    draw.rounded_rectangle((xs[2] + 18, card_y1 + 75, xs[2] + card_w - 18, card_y1 + 128),
-                           radius=14, fill=_hex("#DDF8E7"), outline=_hex("#56C982"), width=2)
+    draw.rounded_rectangle(
+        (xs[2], card_y1, xs[2] + card_w, card_y2),
+        radius=18,
+        fill=_hex("#F0ECFF"),
+    )
+    _draw_icon_circle(
+        draw, (xs[2] + 40, card_y1 + 34), 23, purple, "✓", icon_font
+    )
+    draw.text(
+        (xs[2] + 72, card_y1 + 16),
+        "Result",
+        font=_font(22, True),
+        fill=dark,
+    )
+    result_font = _fit_font(
+        draw, result, [], 29, 18, card_w - 28, True
+    )
+    draw.rounded_rectangle(
+        (xs[2] + 12, card_y1 + 57, xs[2] + card_w - 12, card_y1 + 94),
+        radius=10,
+        fill=_hex("#DDF8E7"),
+        outline=_hex("#56C982"),
+        width=2,
+    )
     rbox = draw.textbbox((0, 0), result, font=result_font)
     rw = rbox[2] - rbox[0]
-    draw.text((xs[2] + (card_w - rw) / 2, card_y1 + 87), result, font=result_font, fill=green)
-    rd = _wrap_text(draw, result_desc, _font(16, False), card_w - 36)
-    yy = card_y1 + 142
-    for line in rd[:2]:
-        draw.text((xs[2] + 18, yy), line, font=_font(16, False), fill=gray)
-        yy += 22
+    draw.text(
+        (xs[2] + (card_w - rw) / 2, card_y1 + 65),
+        result,
+        font=result_font,
+        fill=green,
+    )
 
-    # ---------- Step by Step ----------
-    sy1, sy2 = 1270, 1570
-    draw.rounded_rectangle((18, sy1, W - 18, sy2), radius=24, fill=light_yellow, outline=yellow, width=3)
-    _draw_icon_circle(draw, (68, sy1 + 52), 30, navy, "✓", icon_font)
-    draw.text((116, sy1 + 24), "Step by Step", font=_font(34, True), fill=navy)
-    draw.line((116, sy1 + 69, 350, sy1 + 69), fill=blue, width=4)
+    # ---------- COMPACT STEP BY STEP ----------
+    sy1, sy2 = 1270, 1515
+    draw.rounded_rectangle(
+        (18, sy1, W - 18, sy2),
+        radius=22,
+        fill=light_yellow,
+        outline=yellow,
+        width=3,
+    )
+    _draw_icon_circle(
+        draw, (68, sy1 + 43), 27, navy, "✓", icon_font
+    )
+    draw.text(
+        (110, sy1 + 18),
+        "Step by Step",
+        font=_font(31, True),
+        fill=navy,
+    )
+    draw.line((110, sy1 + 61, 350, sy1 + 61), fill=blue, width=4)
 
     steps = topic["steps"][:4]
-    step_y = sy1 + 92
+    step_y = sy1 + 75
     step_colors = [red, blue, purple, green]
     for idx, step in enumerate(steps, 1):
-        _draw_icon_circle(draw, (65, step_y + 17), 19, step_colors[idx - 1], str(idx), _font(18, True))
-        step_font = _fit_font(draw, step, [], 23, 17, 860, False)
-        draw.text((102, step_y + 3), step, font=step_font, fill=dark)
-        step_y += 50
+        _draw_icon_circle(
+            draw,
+            (65, step_y + 14),
+            17,
+            step_colors[idx - 1],
+            str(idx),
+            _font(16, True),
+        )
+        step_font = _fit_font(
+            draw, step, [], 21, 15, 860, False
+        )
+        draw.text(
+            (102, step_y + 1),
+            step,
+            font=step_font,
+            fill=dark,
+        )
+        step_y += 39
 
-    # Highlight formula action if there is room.
     formula_label = "Formula: " + topic["formula"]
-    ff = _fit_font(draw, formula_label, [], 20, 14, 820, True)
-    draw.rounded_rectangle((102, sy2 - 52, 900, sy2 - 18), radius=10, fill=_hex("#D8F4E2"))
-    draw.text((116, sy2 - 47), formula_label, font=ff, fill=green)
+    ff = _fit_font(draw, formula_label, [], 18, 13, 780, True)
+    draw.rounded_rectangle(
+        (102, sy2 - 43, 900, sy2 - 15),
+        radius=9,
+        fill=_hex("#D8F4E2"),
+    )
+    draw.text(
+        (116, sy2 - 39),
+        formula_label,
+        font=ff,
+        fill=green,
+    )
 
-    # ---------- Pro Tips ----------
-    py1, py2 = 1590, 1720
-    draw.rounded_rectangle((18, py1, W - 18, py2), radius=22, fill=light_blue, outline=_hex("#7CC7FF"), width=3)
-    _draw_icon_circle(draw, (68, py1 + 43), 28, navy, "★", _font(18, True))
-    draw.text((110, py1 + 20), "Pro Tips", font=_font(30, True), fill=navy)
+    # ---------- COMPACT PRO TIPS ----------
+    py1, py2 = 1530, 1640
+    draw.rounded_rectangle(
+        (18, py1, W - 18, py2),
+        radius=20,
+        fill=light_blue,
+        outline=_hex("#7CC7FF"),
+        width=3,
+    )
+    _draw_icon_circle(
+        draw, (68, py1 + 38), 25, navy, "★", _font(17, True)
+    )
+    draw.text(
+        (110, py1 + 16),
+        "Pro Tips",
+        font=_font(28, True),
+        fill=navy,
+    )
 
     tips = _pro_tips(topic)
     col_w = 290
     for i, tip in enumerate(tips):
         x = 120 + i * 315
-        draw.ellipse((x, py1 + 62, x + 22, py1 + 84), fill=blue)
-        draw.text((x + 5, py1 + 61), "✓", font=_font(14, True), fill=white)
-        lines = _wrap_text(draw, tip, _font(17, False), col_w)
-        yy = py1 + 58
-        for line in lines[:3]:
-            draw.text((x + 32, yy), line, font=_font(17, False), fill=dark)
-            yy += 22
+        draw.ellipse(
+            (x, py1 + 57, x + 20, py1 + 77),
+            fill=blue,
+        )
+        draw.text(
+            (x + 4, py1 + 56),
+            "✓",
+            font=_font(13, True),
+            fill=white,
+        )
+        lines = _wrap_text(
+            draw, tip, _font(15, False), col_w
+        )
+        yy = py1 + 53
+        for line in lines[:2]:
+            draw.text(
+                (x + 30, yy),
+                line,
+                font=_font(15, False),
+                fill=dark,
+            )
+            yy += 19
 
-    # ---------- YouTube footer ----------
-    fy1, fy2 = 1740, 1920
-    draw.rounded_rectangle((0, fy1, W, fy2), radius=0, fill=navy)
+    # ---------- YOUTUBE FOOTER ----------
+    fy1, fy2 = 1660, 1920
+    draw.rounded_rectangle(
+        (0, fy1, W, fy2),
+        radius=0,
+        fill=navy,
+    )
     _draw_youtube_icon(draw, 45, fy1 + 28, 70, 48)
-    draw.text((135, fy1 + 24), "Watch on YouTube", font=_font(34, True), fill=white)
-    draw.text((135, fy1 + 73), "Learn more Excel tips, formulas and shortcuts", font=_font(18, False), fill=white)
-    draw.text((135, fy1 + 101), "on our YouTube channel.", font=_font(18, False), fill=white)
+    draw.text(
+        (135, fy1 + 24),
+        "Watch on YouTube",
+        font=_font(34, True),
+        fill=white,
+    )
+    draw.text(
+        (135, fy1 + 73),
+        "Learn more Excel tips, formulas and shortcuts",
+        font=_font(18, False),
+        fill=white,
+    )
+    draw.text(
+        (135, fy1 + 101),
+        "on our YouTube channel.",
+        font=_font(18, False),
+        fill=white,
+    )
 
-    # Channel pill
-    draw.rounded_rectangle((675, fy1 + 28, 1035, fy1 + 82), radius=27, fill=red)
+    draw.rounded_rectangle(
+        (675, fy1 + 28, 1035, fy1 + 82),
+        radius=27,
+        fill=red,
+    )
     _draw_youtube_icon(draw, 690, fy1 + 35, 44, 34)
-    draw.text((748, fy1 + 39), "LearnVerse9556", font=_font(24, True), fill=white)
-    draw.text((748, fy1 + 91), "♧  Subscribe for more!", font=_font(18, False), fill=white)
+    draw.text(
+        (748, fy1 + 39),
+        "LearnVerse9556",
+        font=_font(24, True),
+        fill=white,
+    )
+    draw.text(
+        (748, fy1 + 91),
+        "♧  Subscribe for more!",
+        font=_font(18, False),
+        fill=white,
+    )
 
-    draw.line((135, fy1 + 132, 500, fy1 + 132), fill=blue, width=3)
-    draw.text((310, fy1 + 142), "— Learn Verse • Excel Made Easy —", font=_font(19, False), fill=white)
+    draw.line(
+        (135, fy1 + 132, 500, fy1 + 132),
+        fill=blue,
+        width=3,
+    )
+    draw.text(
+        (310, fy1 + 142),
+        "— Learn Verse • Excel Made Easy —",
+        font=_font(19, False),
+        fill=white,
+    )
 
     image.save(path, "PNG")
-
-
 
 def render_final_video(
     raw_video: Path,
@@ -1591,12 +1758,15 @@ def render_final_video(
     # real-Excel area, then educational cards below it. The Excel capture is
     # placed between y=315 and y=1040; the transparent overlay supplies the
     # header/cards/footer.
+    # V6: crop tighter around the real Excel window so the sheet is larger
+    # and the unused gray desktop area is minimized.
+    # The captured Excel area is placed from y=315 to y=1130 (815 px).
     video_filter = (
         "[0:v]"
-        "crop=900:640:0:0,"
-        "scale=1080:770:flags=lanczos,"
+        "crop=850:640:0:0,"
+        "scale=1080:815:flags=lanczos,"
         "setsar=1,"
-        "pad=1080:1920:0:295:color=white,"
+        "pad=1080:1920:0:315:color=white,"
         "format=yuv420p"
         "[base];"
         "[base][2:v]overlay=0:0:format=auto,"
