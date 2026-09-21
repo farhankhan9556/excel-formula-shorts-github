@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pyautogui
 import win32com.client as win32
+import win32con
+import win32gui
+import win32process
 import edge_tts
 from PIL import Image, ImageDraw, ImageFont
 
@@ -713,10 +716,87 @@ def build_excel_workbook(topic, workbook_path: Path):
     return excel, workbook, sheet
 
 
+def _force_window_foreground(hwnd):
+    """Force a Windows window to the foreground as reliably as possible."""
+    if not hwnd:
+        return False
+
+    try:
+        # Restore/maximize first.
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        time.sleep(0.15)
+        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+
+        foreground = win32gui.GetForegroundWindow()
+        current_tid = win32process.GetWindowThreadProcessId(foreground)[0] if foreground else 0
+        target_tid = win32process.GetWindowThreadProcessId(hwnd)[0]
+
+        # Windows can block SetForegroundWindow when another process owns focus.
+        # Temporarily attach the input queues so Excel can become foreground.
+        if current_tid and current_tid != target_tid:
+            try:
+                win32process.AttachThreadInput(current_tid, target_tid, True)
+            except Exception:
+                pass
+
+        try:
+            win32gui.BringWindowToTop(hwnd)
+            win32gui.SetForegroundWindow(hwnd)
+        finally:
+            if current_tid and current_tid != target_tid:
+                try:
+                    win32process.AttachThreadInput(current_tid, target_tid, False)
+                except Exception:
+                    pass
+
+        # Keep Excel above other desktop windows during recording.
+        try:
+            win32gui.SetWindowPos(
+                hwnd,
+                win32con.HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                win32con.SWP_NOMOVE
+                | win32con.SWP_NOSIZE
+                | win32con.SWP_SHOWWINDOW,
+            )
+        except Exception:
+            pass
+
+        # Re-apply maximize after topmost.
+        win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+        return win32gui.GetForegroundWindow() == hwnd
+
+    except Exception as exc:
+        log(f"Excel foreground enforcement warning: {exc}")
+        return False
+
+
+def _excel_hwnd(excel):
+    try:
+        return int(excel.Hwnd)
+    except Exception:
+        return 0
+
+
 def focus_excel(excel):
     try:
         excel.Visible = True
-        excel.WindowState = -4137
+    except Exception:
+        pass
+
+    hwnd = _excel_hwnd(excel)
+
+    if hwnd:
+        for _ in range(3):
+            if _force_window_foreground(hwnd):
+                break
+            time.sleep(0.25)
+
+    try:
+        excel.WindowState = -4137  # xlMaximized
     except Exception:
         pass
 
@@ -725,7 +805,26 @@ def focus_excel(excel):
     except Exception:
         pass
 
-    time.sleep(1)
+    time.sleep(0.5)
+
+    if hwnd:
+        _force_window_foreground(hwnd)
+
+    time.sleep(0.8)
+
+
+def keep_excel_on_top(excel):
+    """Re-assert Excel as the maximized foreground/topmost window."""
+    try:
+        excel.Visible = True
+    except Exception:
+        pass
+
+    hwnd = _excel_hwnd(excel)
+    if not hwnd:
+        return
+
+    _force_window_foreground(hwnd)
 
 
 def restore_excel_view(excel, sheet):
@@ -733,6 +832,11 @@ def restore_excel_view(excel, sheet):
 
     try:
         sheet.Activate()
+    except Exception:
+        pass
+
+    try:
+        excel.ActiveWindow.WindowState = -4137  # xlMaximized
     except Exception:
         pass
 
@@ -759,42 +863,45 @@ def restore_excel_view(excel, sheet):
     except Exception:
         pass
 
-    # Keep the visible worksheet focused on columns A:G.
-    # Excel may show additional columns depending on window size,
-    # but this forces the sheet itself and selection to start at A1.
     try:
         sheet.Range("A1:G1").Select()
     except Exception:
         pass
 
+    keep_excel_on_top(excel)
     time.sleep(0.5)
 
 
-# ------------------------------------------------------------
-# MOUSE / TYPING DEMO
-# ------------------------------------------------------------
-
-def cell_click_and_type(excel, sheet, cell_address: str, text: str):
-    focus_excel(excel)
+def release_excel_topmost(excel):
+    """Return Excel to normal z-order before closing it."""
+    hwnd = _excel_hwnd(excel)
+    if not hwnd:
+        return
 
     try:
-        sheet.Range(cell_address).Select()
+        win32gui.SetWindowPos(
+            hwnd,
+            win32con.HWND_NOTOPMOST,
+            0,
+            0,
+            0,
+            0,
+            win32con.SWP_NOMOVE
+            | win32con.SWP_NOSIZE
+            | win32con.SWP_SHOWWINDOW,
+        )
     except Exception:
         pass
-
-    time.sleep(0.5)
-
-    pyautogui.write(str(text), interval=0.04)
-    pyautogui.press("enter")
-
-    time.sleep(0.6)
-
 
 def demonstrate_formula(excel, sheet, topic):
     log(f"Demonstrating {topic['name']}")
 
     # Show top-left of Excel.
     restore_excel_view(excel, sheet)
+
+    # Re-assert Excel immediately before any mouse/keyboard automation.
+    # This prevents another application/dialog from receiving keystrokes.
+    keep_excel_on_top(excel)
 
     # Click the formula result area.
     try:
@@ -844,6 +951,7 @@ def demonstrate_formula(excel, sheet, topic):
 
     time.sleep(1)
 
+    keep_excel_on_top(excel)
     restore_excel_view(excel, sheet)
 
 
@@ -1541,6 +1649,7 @@ def save_metadata(
 # ------------------------------------------------------------
 
 def generate_one(topic, index, date_value):
+    log(f"Generator output directory: {OUTPUT.resolve()}")
     prefix = (
         f"learnverse_{date_value}_{index:02d}_{topic['id']}"
     )
@@ -1600,6 +1709,11 @@ def generate_one(topic, index, date_value):
         # Give FFmpeg a moment to start capturing.
         time.sleep(1.0)
 
+        # FFmpeg captures the whole desktop, so Excel must be the actual
+        # foreground/maximized window before the demonstration begins.
+        keep_excel_on_top(excel)
+        time.sleep(0.8)
+
         # 6. Perform the actual Excel interaction.
         demonstrate_formula(
             excel,
@@ -1638,7 +1752,16 @@ def generate_one(topic, index, date_value):
             duration,
         )
 
-        log(f"SUCCESS: {final_path.name}")
+        if not final_path.exists() or final_path.stat().st_size < 50000:
+            raise RuntimeError(
+                f"Final video was not created correctly: {final_path}"
+            )
+
+        log(
+            f"SUCCESS: {final_path.name} | "
+            f"{final_path.stat().st_size:,} bytes | "
+            f"saved to {final_path.resolve()}"
+        )
 
         return {
             "video": final_path,
@@ -1655,6 +1778,10 @@ def generate_one(topic, index, date_value):
                     recorder.wait(timeout=10)
             except Exception:
                 pass
+
+        # Return Excel to normal z-order before closing.
+        if excel is not None:
+            release_excel_topmost(excel)
 
         # Close Excel.
         if workbook is not None:

@@ -19,7 +19,6 @@ on:
 
   schedule:
     # 02:00 UTC = 06:00 UAE
-    # Gives the system several hours before the 09:00 UAE upload window.
     - cron: "0 2 * * *"
 
 permissions:
@@ -32,7 +31,6 @@ jobs:
     timeout-minutes: 120
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -42,7 +40,6 @@ jobs:
           echo ==========================================
           echo LEARN VERSE EXCEL SHORTS
           echo ==========================================
-          echo.
           echo Python:
           python --version
           echo.
@@ -52,6 +49,8 @@ jobs:
           echo Excel:
           python -c "import win32com.client as w; e=w.DispatchEx('Excel.Application'); print('Excel version:', e.Version); e.Quit()"
           echo.
+          echo Persistent PC output:
+          echo C:\excel-formula-shorts-github\output
           echo ==========================================
 
       - name: Install Python requirements
@@ -92,10 +91,6 @@ jobs:
         run: |
           if "%VIDEO_COUNT%"=="" set VIDEO_COUNT=3
 
-          echo ==========================================
-          echo VALIDATING GENERATED SHORTS
-          echo ==========================================
-
           if "%RUN_DATE%"=="" (
             for /f %%D in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyy-MM-dd')"') do set CHECK_DATE=%%D
           ) else (
@@ -104,9 +99,8 @@ jobs:
 
           echo Check date: %CHECK_DATE%
           echo Expected videos: %VIDEO_COUNT%
-          echo.
 
-          python -c "import os, pathlib, sys; d=os.environ['CHECK_DATE']; expected=int(os.environ['VIDEO_COUNT']); p=pathlib.Path('output'); videos=sorted(p.glob(f'learnverse_{d}_*.mp4')); workbooks=sorted(p.glob(f'learnverse_{d}_*.xlsx')); metadata=sorted(p.glob(f'learnverse_{d}_*.json')); print('MP4 videos:',len(videos)); print('Excel workbooks:',len(workbooks)); print('Metadata files:',len(metadata)); print(); [print('VIDEO:',x.name) for x in videos]; print(); sys.exit(0 if len(videos)==expected else 1)"
+          python -c "import os,pathlib,sys; d=os.environ['CHECK_DATE']; expected=int(os.environ['VIDEO_COUNT']); p=pathlib.Path('output'); videos=sorted(p.glob(f'learnverse_{d}_*.mp4')); workbooks=sorted(p.glob(f'learnverse_{d}_*.xlsx')); metadata=sorted(p.glob(f'learnverse_{d}_*.json')); print('MP4 videos:',len(videos)); print('Excel workbooks:',len(workbooks)); print('Metadata files:',len(metadata)); [print('VIDEO:',x.name) for x in videos]; sys.exit(0 if len(videos)==expected and len(workbooks)==expected and len(metadata)==expected else 1)"
 
           if errorlevel 1 (
             echo.
@@ -116,10 +110,40 @@ jobs:
             exit /b 1
           )
 
-          echo.
-          echo ==========================================
-          echo VALIDATION SUCCESSFUL
-          echo ==========================================
+      - name: Copy generated files to permanent PC output
+        shell: powershell
+        run: |
+          $source = Join-Path $env:GITHUB_WORKSPACE "output"
+          $destination = "C:\excel-formula-shorts-github\output"
+
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+
+          $files = Get-ChildItem $source -File |
+            Where-Object {
+              $_.Name -like "learnverse_*.mp4" -or
+              $_.Name -like "learnverse_*.xlsx" -or
+              $_.Name -like "learnverse_*.json"
+            }
+
+          if (-not $files) {
+            throw "No generated LearnVerse files were found in $source"
+          }
+
+          foreach ($file in $files) {
+            Copy-Item -LiteralPath $file.FullName -Destination $destination -Force
+            Write-Host "COPIED:" $file.Name "->" $destination
+          }
+
+          Write-Host ""
+          Write-Host "Permanent PC output now contains:"
+          Get-ChildItem $destination -File |
+            Where-Object {
+              $_.Name -like "learnverse_*.mp4" -or
+              $_.Name -like "learnverse_*.xlsx" -or
+              $_.Name -like "learnverse_*.json"
+            } |
+            Sort-Object LastWriteTime |
+            Format-Table Name, Length, LastWriteTime -AutoSize
 
       - name: Upload generated files as artifact
         uses: actions/upload-artifact@v4
